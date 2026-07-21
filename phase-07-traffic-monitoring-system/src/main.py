@@ -8,7 +8,7 @@ live dashboard UI.
 Run:
     python main.py
 Quit:
-    press 'q' in the video window, or Ctrl+C in the terminal.
+    close the dashboard window, press 'q', or use Ctrl+C in the terminal.
 """
 
 import os
@@ -116,7 +116,7 @@ def run():
     fps_timer = time.time()
 
     try:
-        while True:
+        while dashboard.running:
             ret, frame = camera.read()
             if not ret:
                 log.info("Video finished or camera disconnected.")
@@ -138,7 +138,9 @@ def run():
             draw_fps(output, fps)
 
             dashboard.update_video(output)
-            dashboard.update()
+            if not dashboard.update():
+                log.info("Dashboard closed, shutting down.")
+                break
 
             if cv2.waitKey(1) & 0xFF == ord(QUIT_KEY):
                 log.info("Quit key pressed, shutting down.")
@@ -149,6 +151,7 @@ def run():
 
     finally:
         log.info("Releasing camera and closing windows...")
+        dashboard.close()
         camera.release()
         cv2.destroyAllWindows()
         log.info("Shutdown complete.")

@@ -1,393 +1,458 @@
+"""Responsive Tkinter dashboard for the traffic-monitoring pipeline."""
+
+import datetime
+import math
 import tkinter as tk
 from tkinter import ttk
-from PIL import Image, ImageTk, ImageDraw
+
 import cv2
-import math
-import datetime
+from PIL import Image, ImageOps, ImageTk
 
 
-# ---------------------------------------------------------------------------
-#  COLOR PALETTE  (dark, "control room" style)
-# ---------------------------------------------------------------------------
-BG_MAIN      = "#0b0e14"
-BG_PANEL     = "#131722"
-BG_CARD      = "#1b2030"
-BG_CARD_HI   = "#212840"
-BORDER       = "#2a3145"
-ACCENT       = "#00e0c6"     # teal accent
-ACCENT_DIM   = "#0d8f80"
-DANGER       = "#ff4d5e"
-DANGER_DIM   = "#402028"
-SUCCESS      = "#3ddc84"
-SUCCESS_DIM  = "#173023"
-WARN         = "#ffb84d"
-TEXT_MAIN    = "#e8ecf4"
-TEXT_DIM     = "#8a92a8"
-FONT_FAMILY  = "Segoe UI"
+# Control-room palette
+BG = "#080b12"
+SURFACE = "#101622"
+CARD = "#151d2b"
+CARD_ALT = "#1a2434"
+BORDER = "#273449"
+TEXT = "#edf3fb"
+MUTED = "#8997aa"
+CYAN = "#21d4c2"
+CYAN_DARK = "#123b3b"
+GREEN = "#45dc8c"
+AMBER = "#ffbd59"
+RED = "#ff5d6c"
+RED_DARK = "#3c2029"
+FONT = "DejaVu Sans"
 
 
-class RoundedCard(tk.Frame):
-    """A simple 'card' frame with a border and padding, used to group content."""
-    def __init__(self, master, title=None, accent=ACCENT, **kwargs):
-        super().__init__(master, bg=BG_CARD, highlightbackground=BORDER,
-                          highlightthickness=1, bd=0, **kwargs)
-        if title:
-            head = tk.Frame(self, bg=BG_CARD)
-            head.pack(fill="x", padx=14, pady=(12, 0))
-            tk.Frame(head, bg=accent, width=4, height=16).pack(side="left", padx=(0, 8))
-            tk.Label(head, text=title, font=(FONT_FAMILY, 11, "bold"),
-                      bg=BG_CARD, fg=TEXT_MAIN).pack(side="left")
+class Panel(tk.Frame):
+    """Bordered dashboard card with a consistent title bar."""
+
+    def __init__(self, master, title, accent=CYAN, **kwargs):
+        super().__init__(
+            master, bg=CARD, bd=0, highlightthickness=1,
+            highlightbackground=BORDER, **kwargs
+        )
+        self.header = tk.Frame(self, bg=CARD, height=38)
+        self.header.grid(row=0, column=0, sticky="ew")
+        self.header.grid_propagate(False)
+        self.marker = tk.Frame(self.header, bg=accent, width=3)
+        self.marker.pack(side="left", fill="y")
+        self.title = tk.Label(
+            self.header, text=title, bg=CARD, fg=TEXT,
+            font=(FONT, 10, "bold"), anchor="w"
+        )
+        self.title.pack(side="left", padx=11)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
 
 
-class StatChip(tk.Frame):
-    """Small KPI chip: big number + caption."""
-    def __init__(self, master, caption, value="0", color=ACCENT, **kwargs):
-        super().__init__(master, bg=BG_CARD_HI, highlightbackground=BORDER,
-                          highlightthickness=1, **kwargs)
-        self.value_lbl = tk.Label(self, text=value, font=(FONT_FAMILY, 22, "bold"),
-                                    bg=BG_CARD_HI, fg=color)
-        self.value_lbl.pack(pady=(12, 0))
-        tk.Label(self, text=caption.upper(), font=(FONT_FAMILY, 9),
-                 bg=BG_CARD_HI, fg=TEXT_DIM).pack(pady=(0, 10))
+class MetricCard(tk.Frame):
+    def __init__(self, master, label, color):
+        super().__init__(
+            master, bg=CARD_ALT, bd=0, highlightthickness=1,
+            highlightbackground=BORDER
+        )
+        self.value = tk.Label(
+            self, text="0", bg=CARD_ALT, fg=color,
+            font=(FONT, 22, "bold")
+        )
+        self.value.pack(pady=(9, 0))
+        self.caption = tk.Label(
+            self, text=label.upper(), bg=CARD_ALT, fg=MUTED,
+            font=(FONT, 8, "bold")
+        )
+        self.caption.pack(pady=(0, 8))
 
     def set(self, value):
-        self.value_lbl.config(text=str(value))
+        self.value.configure(text=str(value))
+
+    def set_compact(self, compact):
+        self.value.configure(font=(FONT, 17 if compact else 22, "bold"))
+        self.caption.configure(font=(FONT, 7 if compact else 8, "bold"))
 
 
 class SpeedGauge(tk.Canvas):
-    """A semi-circular speedometer drawn with canvas arcs."""
-    def __init__(self, master, size=210, max_speed=140, **kwargs):
-        super().__init__(master, width=size, height=size * 0.65 + 30,
-                          bg=BG_CARD, highlightthickness=0, **kwargs)
-        self.size = size
-        self.max_speed = max_speed
-        self._draw_static()
-        self.needle = None
-        self.text_id = None
-        self.set_speed(0, limit=60)
+    """Responsive speed gauge redrawn only when its value or size changes."""
 
-    def _draw_static(self):
-        s = self.size
-        pad = 10
-        self.create_arc(pad, pad, s - pad, s - pad, start=0, extent=180,
-                         style="arc", width=16, outline="#2a3145")
-        # colored zones
-        self.create_arc(pad, pad, s - pad, s - pad, start=0, extent=90,
-                         style="arc", width=16, outline=SUCCESS)
-        self.create_arc(pad, pad, s - pad, s - pad, start=90, extent=55,
-                         style="arc", width=16, outline=WARN)
-        self.create_arc(pad, pad, s - pad, s - pad, start=145, extent=35,
-                         style="arc", width=16, outline=DANGER)
+    def __init__(self, master, **kwargs):
+        super().__init__(master, bg=CARD, bd=0, highlightthickness=0, **kwargs)
+        self.speed = 0
+        self.limit = 50
+        self.bind("<Configure>", self._redraw)
 
-    def set_speed(self, speed, limit=60):
-        s = self.size
-        cx, cy = s / 2, s / 2
-        ratio = max(0, min(1, speed / self.max_speed))
-        angle = 180 - ratio * 180  # 180deg (left) -> 0deg (right)
-        rad = math.radians(angle)
-        r = s / 2 - 30
-        x = cx + r * math.cos(rad)
-        y = cy - r * math.sin(rad)
+    def set_speed(self, speed, limit=50):
+        speed = float(speed or 0)
+        if speed != self.speed or limit != self.limit:
+            self.speed, self.limit = speed, limit
+            self._redraw()
 
-        if self.needle:
-            self.delete(self.needle)
-            self.delete(self.hub)
-            self.delete(self.text_id)
-            self.delete(self.cap_id)
+    def _redraw(self, _event=None):
+        width = max(self.winfo_width(), 120)
+        height = max(self.winfo_height(), 95)
+        size = min(width - 16, (height - 12) * 1.75)
+        if size <= 20:
+            return
 
-        color = DANGER if speed > limit else ACCENT
-        self.needle = self.create_line(cx, cy, x, y, width=4, fill=color, capstyle="round")
-        self.hub = self.create_oval(cx - 7, cy - 7, cx + 7, cy + 7, fill=color, outline="")
-        self.text_id = self.create_text(cx, cy + 30, text=f"{speed}", fill=TEXT_MAIN,
-                                          font=(FONT_FAMILY, 20, "bold"))
-        self.cap_id = self.create_text(cx, cy + 52, text="km/h", fill=TEXT_DIM,
-                                         font=(FONT_FAMILY, 9))
+        self.delete("all")
+        cx, cy = width / 2, height * 0.72
+        radius = min(size / 2, cy - 8)
+        box = (cx - radius, cy - radius, cx + radius, cy + radius)
+        self.create_arc(*box, start=0, extent=180, style="arc", width=11, outline=BORDER)
+        self.create_arc(*box, start=0, extent=77, style="arc", width=11, outline=GREEN)
+        self.create_arc(*box, start=77, extent=50, style="arc", width=11, outline=AMBER)
+        self.create_arc(*box, start=127, extent=53, style="arc", width=11, outline=RED)
+
+        ratio = min(max(self.speed / 140, 0), 1)
+        angle = math.radians(180 - ratio * 180)
+        needle_r = radius - 18
+        nx = cx + needle_r * math.cos(angle)
+        ny = cy - needle_r * math.sin(angle)
+        color = RED if self.speed > self.limit else CYAN
+        self.create_line(cx, cy, nx, ny, fill=color, width=4)
+        self.create_oval(cx - 6, cy - 6, cx + 6, cy + 6, fill=color, outline="")
+        self.create_text(
+            cx, cy + 23, text=f"{self.speed:g}", fill=TEXT,
+            font=(FONT, 17, "bold")
+        )
+        self.create_text(cx, cy + 42, text="km/h", fill=MUTED, font=(FONT, 8))
 
 
 class Dashboard:
+    """Responsive UI. Public methods remain compatible with the old dashboard."""
 
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("AI Traffic Monitoring System")
-        self.root.geometry("1680x950")
-        self.root.configure(bg=BG_MAIN)
-        self.root.minsize(1280, 760)
+        self.root.title("TrafficOps | AI Monitoring")
+        self.root.configure(bg=BG)
 
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        width = min(1600, max(900, screen_w - 70))
+        height = min(950, max(620, screen_h - 100))
+        self.root.geometry(f"{width}x{height}")
+        # Never request a minimum larger than the user's usable display.
+        self.root.minsize(min(900, screen_w), min(620, screen_h))
+
+        self.running = True
         self.vehicle_rows = {}
         self.total_count = 0
-        self.overspeed_count = 0
-        self.speed_sum = 0
-        self.speed_n = 0
+        self.overspeed_ids = set()
+        self._photo = None
+        self._last_frame_rgb = None
+        self._last_render_size = (0, 0)
+        self._frame_dirty = False
+        self._resize_job = None
+        self._compact = None
 
-        self._build_style()
+        self._configure_style()
         self._build_header()
-        self._build_body()
+        self._build_content()
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
+        self.root.bind("<Configure>", self._schedule_responsive_update)
         self._tick_clock()
+        self.root.after_idle(self._apply_responsive_layout)
 
-    # ------------------------------------------------------------------
-    # STYLE
-    # ------------------------------------------------------------------
-    def _build_style(self):
-        style = ttk.Style()
+    def _configure_style(self):
+        style = ttk.Style(self.root)
         style.theme_use("clam")
+        style.configure(
+            "Traffic.Treeview", background=CARD, fieldbackground=CARD,
+            foreground=TEXT, rowheight=29, borderwidth=0, font=(FONT, 9)
+        )
+        style.configure(
+            "Traffic.Treeview.Heading", background=CARD_ALT, foreground=CYAN,
+            relief="flat", padding=(6, 8), font=(FONT, 9, "bold")
+        )
+        style.map(
+            "Traffic.Treeview", background=[("selected", CYAN_DARK)],
+            foreground=[("selected", TEXT)]
+        )
+        style.configure(
+            "Traffic.Vertical.TScrollbar", background=CARD_ALT,
+            troughcolor=SURFACE, bordercolor=SURFACE, arrowcolor=MUTED
+        )
+        style.configure(
+            "Traffic.Horizontal.TScrollbar", background=CARD_ALT,
+            troughcolor=SURFACE, bordercolor=SURFACE, arrowcolor=MUTED
+        )
 
-        style.configure("Treeview",
-                        background=BG_CARD,
-                        fieldbackground=BG_CARD,
-                        foreground=TEXT_MAIN,
-                        rowheight=32,
-                        borderwidth=0,
-                        font=(FONT_FAMILY, 10))
-        style.configure("Treeview.Heading",
-                        background=BG_CARD_HI,
-                        foreground=ACCENT,
-                        relief="flat",
-                        font=(FONT_FAMILY, 10, "bold"))
-        style.map("Treeview.Heading", background=[("active", BG_CARD_HI)])
-        style.map("Treeview", background=[("selected", ACCENT_DIM)],
-                  foreground=[("selected", TEXT_MAIN)])
-        style.layout("Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
-
-    # ------------------------------------------------------------------
-    # HEADER
-    # ------------------------------------------------------------------
     def _build_header(self):
-        header = tk.Frame(self.root, bg=BG_PANEL, height=70)
-        header.pack(fill="x", side="top")
-        header.pack_propagate(False)
+        self.header = tk.Frame(self.root, bg=SURFACE, height=66)
+        self.header.pack(side="top", fill="x")
+        self.header.pack_propagate(False)
 
-        left = tk.Frame(header, bg=BG_PANEL)
-        left.pack(side="left", padx=20)
+        brand = tk.Frame(self.header, bg=SURFACE)
+        brand.pack(side="left", fill="y", padx=18)
+        tk.Label(brand, text="●", bg=SURFACE, fg=CYAN, font=(FONT, 16)).pack(side="left")
+        brand_text = tk.Frame(brand, bg=SURFACE)
+        brand_text.pack(side="left", padx=9)
+        self.title_label = tk.Label(
+            brand_text, text="TRAFFICOPS", bg=SURFACE, fg=TEXT,
+            font=(FONT, 16, "bold"), anchor="w"
+        )
+        self.title_label.pack(anchor="w")
+        self.subtitle_label = tk.Label(
+            brand_text, text="AI traffic intelligence and violation monitoring",
+            bg=SURFACE, fg=MUTED, font=(FONT, 8), anchor="w"
+        )
+        self.subtitle_label.pack(anchor="w")
 
-        tk.Label(left, text="\u25CF", font=(FONT_FAMILY, 16), bg=BG_PANEL,
-                 fg=ACCENT).pack(side="left", padx=(0, 8))
+        status = tk.Frame(self.header, bg=SURFACE)
+        status.pack(side="right", fill="y", padx=18)
+        self.clock_label = tk.Label(
+            status, text="", bg=SURFACE, fg=TEXT, font=(FONT, 10, "bold")
+        )
+        self.clock_label.pack(side="right")
+        self.live_label = tk.Label(
+            status, text="●  LIVE", bg=SURFACE, fg=GREEN, font=(FONT, 9, "bold")
+        )
+        self.live_label.pack(side="right", padx=(0, 18))
 
-        title_box = tk.Frame(left, bg=BG_PANEL)
-        title_box.pack(side="left")
-        tk.Label(title_box, text="AI TRAFFIC MONITORING DASHBOARD",
-                 font=(FONT_FAMILY, 17, "bold"), bg=BG_PANEL, fg=TEXT_MAIN
-                 ).pack(anchor="w")
-        tk.Label(title_box, text="Real-time vehicle detection · speed estimation · violation tracking",
-                 font=(FONT_FAMILY, 9), bg=BG_PANEL, fg=TEXT_DIM).pack(anchor="w")
+    def _build_content(self):
+        self.content = tk.Frame(self.root, bg=BG)
+        self.content.pack(fill="both", expand=True, padx=14, pady=14)
+        self.content.grid_columnconfigure(0, weight=1, minsize=360)
+        self.content.grid_columnconfigure(1, weight=0, minsize=310)
+        self.content.grid_rowconfigure(0, weight=3, minsize=300)
+        self.content.grid_rowconfigure(1, weight=2, minsize=180)
 
-        right = tk.Frame(header, bg=BG_PANEL)
-        right.pack(side="right", padx=20)
+        self.video_panel = Panel(self.content, "CAMERA 01  /  LIVE FEED")
+        self.video_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        self.video_viewport = tk.Frame(self.video_panel, bg="black")
+        self.video_viewport.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
+        self.video_viewport.grid_propagate(False)
+        self.video_label = tk.Label(
+            self.video_viewport, text="Waiting for camera feed…", bg="black",
+            fg=MUTED, font=(FONT, 10)
+        )
+        self.video_label.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self.video_viewport.bind("<Configure>", self._video_viewport_changed)
 
-        self.status_dot = tk.Label(right, text="\u25CF", font=(FONT_FAMILY, 12),
-                                    bg=BG_PANEL, fg=SUCCESS)
-        self.status_dot.pack(side="left", padx=(0, 6))
-        tk.Label(right, text="LIVE", font=(FONT_FAMILY, 10, "bold"),
-                 bg=BG_PANEL, fg=SUCCESS).pack(side="left", padx=(0, 20))
+        self.sidebar = tk.Frame(self.content, bg=BG, width=340)
+        self.sidebar.grid(row=0, column=1, sticky="nsew")
+        self.sidebar.grid_propagate(False)
+        self.sidebar.grid_columnconfigure((0, 1), weight=1)
+        self.sidebar.grid_rowconfigure(2, weight=1)
 
-        self.clock_lbl = tk.Label(right, text="", font=(FONT_FAMILY, 13, "bold"),
-                                    bg=BG_PANEL, fg=TEXT_MAIN)
-        self.clock_lbl.pack(side="left")
+        self.total_card = MetricCard(self.sidebar, "Vehicles", CYAN)
+        self.total_card.grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=(0, 10))
+        self.over_card = MetricCard(self.sidebar, "Overspeed", RED)
+        self.over_card.grid(row=0, column=1, sticky="nsew", padx=(5, 0), pady=(0, 10))
 
-    def _tick_clock(self):
-        now = datetime.datetime.now()
-        self.clock_lbl.config(text=now.strftime("%H:%M:%S   %d %b %Y"))
-        self.root.after(1000, self._tick_clock)
+        self.gauge_panel = Panel(self.sidebar, "CURRENT SPEED")
+        self.gauge_panel.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(0, 10))
+        self.gauge = SpeedGauge(self.gauge_panel, height=150)
+        self.gauge.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 5))
 
-    # ------------------------------------------------------------------
-    # BODY
-    # ------------------------------------------------------------------
-    def _build_body(self):
-        body = tk.Frame(self.root, bg=BG_MAIN)
-        body.pack(fill="both", expand=True, padx=16, pady=16)
-
-        top = tk.Frame(body, bg=BG_MAIN)
-        top.pack(fill="both", expand=True)
-
-        # ---------------- VIDEO CARD (left) ----------------
-        video_card = RoundedCard(top, title="CAMERA FEED — CAM 01")
-        video_card.pack(side="left", fill="both", expand=True, padx=(0, 12))
-
-        video_wrap = tk.Frame(video_card, bg="black", highlightbackground=BORDER,
-                               highlightthickness=1)
-        video_wrap.pack(padx=14, pady=14, fill="both", expand=True)
-
-        self.video_label = tk.Label(video_wrap, bg="black",
-                                     text="Waiting for camera feed…",
-                                     fg=TEXT_DIM, font=(FONT_FAMILY, 12))
-        self.video_label.pack(fill="both", expand=True)
-
-        # ---------------- SIDE PANEL (right) ----------------
-        side = tk.Frame(top, bg=BG_MAIN, width=380)
-        side.pack(side="right", fill="y")
-        side.pack_propagate(False)
-
-        # KPI chips row
-        kpi_row = tk.Frame(side, bg=BG_MAIN)
-        kpi_row.pack(fill="x", pady=(0, 12))
-        self.chip_total = StatChip(kpi_row, "Vehicles", "0", ACCENT)
-        self.chip_total.pack(side="left", fill="x", expand=True, padx=(0, 6))
-        self.chip_over = StatChip(kpi_row, "Overspeed", "0", DANGER)
-        self.chip_over.pack(side="left", fill="x", expand=True, padx=(6, 0))
-
-        # Gauge card
-        gauge_card = RoundedCard(side, title="CURRENT SPEED")
-        gauge_card.pack(fill="x", pady=(0, 12))
-        self.gauge = SpeedGauge(gauge_card)
-        self.gauge.pack(pady=(6, 10))
-
-        # Vehicle detail card
-        detail_card = RoundedCard(side, title="VEHICLE DETAIL")
-        detail_card.pack(fill="both", expand=True)
-
+        self.detail_panel = Panel(self.sidebar, "ACTIVE VEHICLE")
+        self.detail_panel.grid(row=2, column=0, columnspan=2, sticky="nsew")
+        detail_body = tk.Frame(self.detail_panel, bg=CARD)
+        detail_body.grid(row=1, column=0, sticky="nsew", padx=13, pady=(0, 12))
+        detail_body.grid_columnconfigure(0, weight=1)
+        detail_body.grid_rowconfigure(0, weight=1)
         self.info_label = tk.Label(
-            detail_card,
-            text="No vehicle detected yet.",
-            font=(FONT_FAMILY, 11),
-            bg=BG_CARD,
-            fg=TEXT_DIM,
-            justify="left",
-            anchor="nw"
+            detail_body, text="No vehicle detected yet", bg=CARD, fg=MUTED,
+            justify="left", anchor="nw", font=(FONT, 9)
         )
-        self.info_label.pack(fill="both", expand=True, padx=16, pady=12)
-
+        self.info_label.grid(row=0, column=0, sticky="nsew")
         self.status_banner = tk.Label(
-            detail_card, text="", font=(FONT_FAMILY, 11, "bold"),
-            bg=BG_CARD, fg=TEXT_MAIN, pady=8
+            detail_body, text="AWAITING DATA", bg=CARD_ALT, fg=MUTED,
+            font=(FONT, 9, "bold"), pady=7
         )
-        self.status_banner.pack(fill="x", padx=14, pady=(0, 14))
+        self.status_banner.grid(row=1, column=0, sticky="ew", pady=(8, 0))
 
-        # ---------------- TABLE CARD (bottom) ----------------
-        table_card = RoundedCard(body, title="DETECTION LOG")
-        table_card.pack(fill="both", expand=False, pady=(16, 0))
+        self.table_panel = Panel(self.content, "DETECTION HISTORY")
+        self.table_panel.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(12, 0))
+        table_wrap = tk.Frame(self.table_panel, bg=CARD)
+        table_wrap.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
+        table_wrap.grid_columnconfigure(0, weight=1)
+        table_wrap.grid_rowconfigure(0, weight=1)
 
         columns = ("ID", "TYPE", "PLATE", "SPEED", "LIMIT", "STATUS", "TIME")
-        self.table = ttk.Treeview(table_card, columns=columns, show="headings", height=10)
+        self.table = ttk.Treeview(
+            table_wrap, columns=columns, show="headings", height=6,
+            style="Traffic.Treeview"
+        )
+        for column in columns:
+            self.table.heading(column, text=column)
+            self.table.column(column, width=100, minwidth=70, anchor="center", stretch=True)
+        self.table.column("ID", width=70, minwidth=55)
+        self.table.column("TYPE", width=115)
+        self.table.column("PLATE", width=145)
+        self.table.column("STATUS", width=130)
 
-        widths = {"ID": 80, "TYPE": 140, "PLATE": 160, "SPEED": 120,
-                  "LIMIT": 120, "STATUS": 140, "TIME": 140}
-        for col in columns:
-            self.table.heading(col, text=col)
-            self.table.column(col, width=widths.get(col, 120), anchor="center")
+        vertical = ttk.Scrollbar(
+            table_wrap, orient="vertical", command=self.table.yview,
+            style="Traffic.Vertical.TScrollbar"
+        )
+        horizontal = ttk.Scrollbar(
+            table_wrap, orient="horizontal", command=self.table.xview,
+            style="Traffic.Horizontal.TScrollbar"
+        )
+        self.table.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+        self.table.grid(row=0, column=0, sticky="nsew")
+        vertical.grid(row=0, column=1, sticky="ns")
+        horizontal.grid(row=1, column=0, sticky="ew")
+        self.table.tag_configure("overspeed", foreground=RED)
+        self.table.tag_configure("normal", foreground=GREEN)
 
-        vsb = ttk.Scrollbar(table_card, orient="vertical", command=self.table.yview)
-        self.table.configure(yscrollcommand=vsb.set)
+    def _tick_clock(self):
+        if not self.running:
+            return
+        now = datetime.datetime.now()
+        self.clock_label.configure(text=now.strftime("%H:%M:%S   %d %b %Y"))
+        self.root.after(1000, self._tick_clock)
 
-        self.table.pack(side="left", fill="both", expand=True, padx=(14, 0), pady=14)
-        vsb.pack(side="right", fill="y", pady=14, padx=(0, 14))
+    def _schedule_responsive_update(self, event):
+        if event.widget is not self.root or not self.running:
+            return
+        if self._resize_job:
+            self.root.after_cancel(self._resize_job)
+        self._resize_job = self.root.after(100, self._apply_responsive_layout)
 
-        self.table.tag_configure("OVER", foreground=DANGER)
-        self.table.tag_configure("NORMAL", foreground=SUCCESS)
-        self.table.tag_configure("oddrow", background=BG_CARD)
-        self.table.tag_configure("evenrow", background=BG_CARD_HI)
+    def _apply_responsive_layout(self):
+        if not self.running:
+            return
+        self._resize_job = None
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        compact = width < 1450 or height < 850
 
-    # ------------------------------------------------------------------
-    # PUBLIC API (same signatures as the original Dashboard)
-    # ------------------------------------------------------------------
+        sidebar_width = 310 if compact else 350
+        self.sidebar.configure(width=sidebar_width)
+        self.content.grid_columnconfigure(1, minsize=sidebar_width)
+        self.header.configure(height=58 if compact else 66)
+        self.title_label.configure(font=(FONT, 13 if compact else 16, "bold"))
+        self.subtitle_label.configure(font=(FONT, 7 if compact else 8))
+        self.clock_label.configure(font=(FONT, 9 if compact else 10, "bold"))
+        self.total_card.set_compact(compact)
+        self.over_card.set_compact(compact)
+        self.gauge.configure(height=105 if compact else 150)
+        self.table.configure(height=4 if compact else 7)
+        ttk.Style(self.root).configure(
+            "Traffic.Treeview", rowheight=25 if compact else 30,
+            font=(FONT, 8 if compact else 9)
+        )
+        self._compact = compact
+        self._render_last_frame(force=True)
+
+    def _video_viewport_changed(self, _event=None):
+        if self._resize_job is None and self.running:
+            self._resize_job = self.root.after(80, self._finish_video_resize)
+
+    def _finish_video_resize(self):
+        self._resize_job = None
+        self._render_last_frame(force=True)
+
+    def _render_last_frame(self, force=False):
+        if self._last_frame_rgb is None or not self.running:
+            return
+        width = max(self.video_viewport.winfo_width(), 2)
+        height = max(self.video_viewport.winfo_height(), 2)
+        size = (width, height)
+        if not force and not self._frame_dirty and size == self._last_render_size:
+            return
+
+        source = Image.fromarray(self._last_frame_rgb)
+        fitted = ImageOps.contain(source, size, Image.Resampling.BILINEAR)
+        canvas = Image.new("RGB", size, "black")
+        canvas.paste(fitted, ((width - fitted.width) // 2, (height - fitted.height) // 2))
+        self._photo = ImageTk.PhotoImage(canvas)
+        self.video_label.configure(image=self._photo, text="")
+        self._last_render_size = size
+        self._frame_dirty = False
+
+    # Public API retained for src/main.py.
     def update_video(self, frame):
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(frame)
-
-        w = self.video_label.winfo_width() or 900
-        h = self.video_label.winfo_height() or 550
-        img = img.resize((max(w, 100), max(h, 100)))
-        img = ImageTk.PhotoImage(img)
-
-        self.video_label.config(image=img, text="")
-        self.video_label.image = img
+        if not self.running or frame is None:
+            return
+        self._last_frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        self._frame_dirty = True
+        self._render_last_frame()
 
     def update_vehicle(self, vehicle_id, vehicle_type, plate, speed, limit, status):
+        if not self.running:
+            return
         is_over = status == "OVERSPEED"
-
-        # ---- side detail panel ----
-        self.info_label.config(
-            text=(
-                f"ID           :  {vehicle_id}\n"
-                f"Type         :  {vehicle_type}\n"
-                f"Plate        :  {plate}\n"
-                f"Speed        :  {speed} km/hr\n"
-                f"Speed Limit  :  {limit} km/hr\n"
-            ),
-            fg=TEXT_MAIN
+        self.info_label.configure(
+            text=(f"Vehicle ID     {vehicle_id}\n"
+                  f"Type           {vehicle_type}\n"
+                  f"Plate          {plate}\n"
+                  f"Speed          {speed} km/h\n"
+                  f"Limit          {limit} km/h"),
+            fg=TEXT
         )
-
         if is_over:
-            self.status_banner.config(text="⚠  OVERSPEED VIOLATION", bg=DANGER_DIM, fg=DANGER)
+            self.status_banner.configure(text="⚠  OVERSPEED VIOLATION", bg=RED_DARK, fg=RED)
+            self.overspeed_ids.add(vehicle_id)
         else:
-            self.status_banner.config(text="✓  WITHIN SPEED LIMIT", bg=SUCCESS_DIM, fg=SUCCESS)
+            self.status_banner.configure(text="✓  WITHIN SPEED LIMIT", bg=CYAN_DARK, fg=GREEN)
 
-        # ---- gauge ----
-        self.gauge.set_speed(speed, limit)
-
-        # ---- KPI chips ----
         if vehicle_id not in self.vehicle_rows:
             self.total_count += 1
-            self.chip_total.set(self.total_count)
-        if is_over:
-            self.overspeed_count += 1
-            self.chip_over.set(self.overspeed_count)
+            self.total_card.set(self.total_count)
+        self.over_card.set(len(self.overspeed_ids))
+        self.gauge.set_speed(speed, limit)
 
-        # ---- table ----
-        time_str = datetime.datetime.now().strftime("%H:%M:%S")
-        values = (vehicle_id, vehicle_type, plate, f"{speed} km/hr",
-                  f"{limit} km/hr", status, time_str)
-
-        tag = "OVER" if is_over else "NORMAL"
-        stripe = "evenrow" if len(self.vehicle_rows) % 2 == 0 else "oddrow"
-
-        if vehicle_id not in self.vehicle_rows:
-            row = self.table.insert("", 0, values=values, tags=(tag, stripe))
-            self.vehicle_rows[vehicle_id] = row
+        values = (
+            vehicle_id, vehicle_type, plate, f"{speed} km/h", f"{limit} km/h",
+            status, datetime.datetime.now().strftime("%H:%M:%S")
+        )
+        tag = "overspeed" if is_over else "normal"
+        if vehicle_id in self.vehicle_rows:
+            self.table.item(self.vehicle_rows[vehicle_id], values=values, tags=(tag,))
         else:
-            row = self.vehicle_rows[vehicle_id]
-            self.table.item(row, values=values, tags=(tag, stripe))
+            row = self.table.insert("", 0, values=values, tags=(tag,))
+            self.vehicle_rows[vehicle_id] = row
 
     def update(self):
-        self.root.update()
+        if not self.running:
+            return False
+        try:
+            self.root.update_idletasks()
+            self.root.update()
+            return True
+        except tk.TclError:
+            self.running = False
+            return False
+
+    def close(self):
+        """Signal the processing loop to stop and close the window safely."""
+        if not self.running:
+            return
+        self.running = False
+        if self._resize_job:
+            try:
+                self.root.after_cancel(self._resize_job)
+            except tk.TclError:
+                pass
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
 
 
-# ---------------------------------------------------------------------------
-#  DEMO / STANDALONE RUNNER
-#  (Lets you preview the UI immediately without any real detection pipeline.
-#   Feeds a synthetic "road" frame + fake vehicle data. Safe to delete this
-#   block once you wire in your real detection + speed-estimation code.)
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    # Lightweight UI preview without loading YOLO.
     import random
     import numpy as np
 
-    dash = Dashboard()
+    dashboard = Dashboard()
+    frame_number = 0
 
-    demo_types = ["Car", "Bus", "Truck", "Motorbike"]
-    demo_state = {"frame_i": 0, "veh_i": 0}
-
-    def synthetic_frame(i):
-        img = Image.new("RGB", (960, 540), (30, 34, 44))
-        draw = ImageDraw.Draw(img)
-        # road
-        draw.rectangle([0, 200, 960, 540], fill=(45, 48, 58))
-        for x in range(-40, 960, 80):
-            offset = (i * 6) % 80
-            draw.rectangle([x + offset, 360, x + offset + 40, 372], fill=(200, 200, 60))
-        # a moving "car"
-        cx = (i * 5) % 1100 - 100
-        draw.rectangle([cx, 300, cx + 90, 340], fill=(0, 200, 180))
-        return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-
-    def demo_loop():
-        demo_state["frame_i"] += 1
-        dash.update_video(synthetic_frame(demo_state["frame_i"]))
-
-        if demo_state["frame_i"] % 25 == 0:
-            demo_state["veh_i"] += 1
-            vid = demo_state["veh_i"]
-            speed = random.randint(35, 110)
-            limit = 60
-            status = "OVERSPEED" if speed > limit else "NORMAL"
-            dash.update_vehicle(
-                vehicle_id=f"V{vid:03d}",
-                vehicle_type=random.choice(demo_types),
-                plate=f"BA {random.randint(10,99)} PA {random.randint(1000,9999)}",
-                speed=speed,
-                limit=limit,
-                status=status
+    while dashboard.running:
+        frame_number += 1
+        frame = np.full((540, 960, 3), (25, 30, 40), dtype=np.uint8)
+        cv2.rectangle(frame, (0, 210), (960, 540), (48, 53, 63), -1)
+        x = (frame_number * 5) % 1080 - 100
+        cv2.rectangle(frame, (x, 310), (x + 100, 355), (190, 190, 35), -1)
+        dashboard.update_video(frame)
+        if frame_number % 30 == 0:
+            speed = random.randint(30, 105)
+            dashboard.update_vehicle(
+                frame_number // 30, "Car", "BA 12 PA 1234", speed, 50,
+                "OVERSPEED" if speed > 50 else "NORMAL"
             )
-
-        dash.root.after(40, demo_loop)
-
-    demo_loop()
-    dash.root.mainloop()
+        dashboard.update()
