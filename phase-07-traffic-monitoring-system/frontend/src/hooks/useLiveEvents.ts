@@ -17,6 +17,7 @@ export function useLiveEvents() {
   const [latest, setLatest] = useState<VehicleDetection | null>(null);
   const [fps, setFps] = useState(27.4);
   const seen = useRef(new Set<string>());
+  const lastQueryRefresh = useRef(0);
 
   useEffect(() => {
     let socket: WebSocket | null = null;
@@ -30,9 +31,12 @@ export function useLiveEvents() {
       seen.current.add(key);
       if (seen.current.size > 300) seen.current = new Set(Array.from(seen.current).slice(-150));
       setLatest(detection);
-      client.invalidateQueries({ queryKey: ["summary"] });
-      client.invalidateQueries({ queryKey: ["vehicles"] });
-      client.invalidateQueries({ queryKey: ["analytics"] });
+      if (Date.now() - lastQueryRefresh.current >= 2000) {
+        client.invalidateQueries({ queryKey: ["summary"] });
+        client.invalidateQueries({ queryKey: ["vehicles"] });
+        client.invalidateQueries({ queryKey: ["analytics"] });
+        lastQueryRefresh.current = Date.now();
+      }
     };
 
     if (config.useMocks) {

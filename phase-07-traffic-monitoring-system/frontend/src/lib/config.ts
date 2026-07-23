@@ -1,6 +1,11 @@
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
+const defaultWebSocketUrl = typeof window === "undefined"
+  ? "ws://localhost:8000/ws/live"
+  : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws/live`;
+
 export const config = {
-  apiBaseUrl: (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, ""),
-  wsUrl: import.meta.env.VITE_WS_URL ?? "ws://localhost:8000/ws/live",
+  apiBaseUrl,
+  wsUrl: import.meta.env.VITE_WS_URL || defaultWebSocketUrl,
   useMocks: (import.meta.env.VITE_USE_MOCKS ?? "true").toLowerCase() === "true"
 };
 

@@ -2,7 +2,7 @@
 
 TrafficOps is the browser dashboard for the AI traffic-monitoring pipeline in the parent project. It provides a responsive control-room interface for a live annotated camera feed, vehicle metrics, speed violations, detection history, and analytics.
 
-The current Python pipeline has no HTTP API, WebSocket server, or browser video endpoint. This frontend therefore runs in demo mode by default and isolates all future backend integration in `src/services`, `src/lib/config.ts`, and `src/hooks/useLiveEvents.ts`.
+The Python project now includes a FastAPI integration in `../web` with REST, WebSocket, and MJPEG endpoints. The frontend can use that service or run independently in demo mode.
 
 ## Requirements
 
@@ -17,7 +17,7 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. `VITE_USE_MOCKS=true` makes every page usable without the Python application.
+Open the local URL printed by Vite. Use `VITE_USE_MOCKS=false` with `python ../run_web.py`; set it to `true` to develop without the Python application.
 
 ## Environment
 
@@ -27,7 +27,7 @@ Open the local URL printed by Vite. `VITE_USE_MOCKS=true` makes every page usabl
 | `VITE_WS_URL` | `ws://localhost:8000/ws/live` | Real-time event socket |
 | `VITE_USE_MOCKS` | `true` | Use deterministic demo data instead of the backend |
 
-Set `VITE_USE_MOCKS=false` only after the backend contract below is available. API failures remain visible in real mode.
+API failures remain visible in real mode.
 
 ## Commands
 
@@ -87,8 +87,6 @@ Example system-status event:
 }
 ```
 
-## Recommended backend step
+## Backend
 
-Add a small FastAPI layer beside the existing Python pipeline. It should expose read-only REST queries over SQLite, publish annotated OpenCV frames as MJPEG, configure CORS for the frontend origin, and send detection/system events through WebSocket. The React application never accesses SQLite or Python process memory directly.
-
-The existing Tkinter dashboard and computer-vision pipeline are intentionally unchanged.
+The FastAPI layer is implemented in `../web/api.py`, with the computer-vision worker in `../web/runtime.py`. Run it from the parent directory using `python run_web.py`. The React application never accesses SQLite or Python process memory directly, and the existing Tkinter dashboard remains available.

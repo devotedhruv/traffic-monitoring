@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { config, endpoints } from "../lib/config";
-import { api } from "../services/api";
+import { getMockVehicles } from "../mocks/data";
 
 describe("API configuration", () => {
-  it("uses mock mode by default in development", () => {
-    expect(config.useMocks).toBe(true);
+  it("uses real API mode for the connected local environment", () => {
+    expect(config.useMocks).toBe(false);
   });
 
   it("keeps endpoint paths centralized", () => {
@@ -13,7 +13,7 @@ describe("API configuration", () => {
   });
 
   it("returns deterministic filtered mock data", async () => {
-    const data = await api.getVehicles({ page: 1, pageSize: 20, status: "OVERSPEED", type: "", search: "", sort: "time_desc" });
+    const data = await getMockVehicles({ page: 1, pageSize: 20, status: "OVERSPEED", type: "", search: "", sort: "time_desc" });
     expect(data.items.length).toBeGreaterThan(0);
     expect(data.items.every((item) => item.status === "OVERSPEED")).toBe(true);
   });
