@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --color-page: 8 11 18;
+  --color-surface: 16 22 34;
+  --color-card: 21 29 43;
+  --color-elevated: 26 36 52;
+  --color-line: 39 52 73;
+  --color-ink: 237 243 251;
+  --color-muted: 137 151 170;
+  --color-cyan: 33 212 194;
+  --color-cyan-dark: 18 59 59;
+  --color-success: 69 220 140;
+  --color-amber: 255 189 89;
+  --color-danger: 255 93 108;
+  --color-danger-dark: 60 32 41;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  background: rgb(var(--color-page));
+  color: rgb(var(--color-ink));
+}
+
+* { box-sizing: border-box; }
+html { background: rgb(var(--color-page)); }
+body { min-width: 320px; min-height: 100vh; margin: 0; }
+button, input, select { font: inherit; }
+button, a, input, select { outline: none; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {
+  box-shadow: 0 0 0 2px rgb(var(--color-page)), 0 0 0 4px rgb(var(--color-cyan));
+}
+.tabular-nums { font-variant-numeric: tabular-nums; }
+.scrollbar-thin { scrollbar-color: rgb(var(--color-line)) transparent; scrollbar-width: thin; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
