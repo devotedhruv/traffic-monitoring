@@ -45,7 +45,6 @@ PLATE_PLACEHOLDER = "UNKNOWN"      # TODO: wire in ANPR module (Phase 6)
 ALERT_COLOR_OVER = (0, 0, 255)     # red   (BGR)
 ALERT_COLOR_OK = (0, 255, 0)       # green (BGR)
 FPS_COLOR = (0, 220, 255)
-QUIT_KEY = "q"
 
 
 def draw_status_overlay(frame, status: str, position=(50, 50)):
@@ -142,18 +141,13 @@ def run():
                 log.info("Dashboard closed, shutting down.")
                 break
 
-            if cv2.waitKey(1) & 0xFF == ord(QUIT_KEY):
-                log.info("Quit key pressed, shutting down.")
-                break
-
     except KeyboardInterrupt:
         log.info("Interrupted by user (Ctrl+C).")
 
     finally:
-        log.info("Releasing camera and closing windows...")
+        log.info("Releasing camera and closing dashboard...")
         dashboard.close()
         camera.release()
-        cv2.destroyAllWindows()
         log.info("Shutdown complete.")
 
 

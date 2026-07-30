@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import { Activity, Menu, Radio, X } from "lucide-react";
-import { NavLink } from "react-router-dom";
 import { useLive } from "../../app/LiveContext";
+import { usePathname } from "../../app/router";
 import { config } from "../../lib/config";
 import { cx, formatDateTime } from "../../lib/format";
+import { Link } from "../ui/Link";
 
 const links = [["/", "Dashboard"], ["/history", "History"], ["/analytics", "Analytics"]] as const;
 
 export function AppHeader() {
   const [now, setNow] = useState(new Date());
   const [menu, setMenu] = useState(false);
+  const pathname = usePathname().replace(/\/+$/, "") || "/";
   const { connection } = useLive();
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
@@ -21,15 +23,15 @@ export function AppHeader() {
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-surface/95 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-[1800px] items-center gap-4 px-4 lg:px-6">
-        <NavLink to="/" className="flex min-w-0 items-center gap-3" aria-label="TrafficOps dashboard">
+        <Link to="/" className="flex min-w-0 items-center gap-3" aria-label="TrafficOps dashboard">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-cyan/30 bg-cyan-dark text-cyan"><Activity size={20} /></span>
           <span className="min-w-0">
             <span className="block text-sm font-extrabold tracking-[0.16em]">TRAFFICOPS</span>
             <span className="hidden truncate text-[11px] text-muted sm:block">AI traffic intelligence and violation monitoring</span>
           </span>
-        </NavLink>
+        </Link>
         <nav className="ml-6 hidden items-center gap-1 lg:flex" aria-label="Main navigation">
-          {links.map(([to, text]) => <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => cx("rounded px-3 py-2 text-sm font-medium text-muted hover:bg-elevated hover:text-ink", isActive && "bg-elevated text-cyan")}>{text}</NavLink>)}
+          {links.map(([to, text]) => <Link key={to} to={to} aria-current={pathname === to ? "page" : undefined} className={cx("rounded px-3 py-2 text-sm font-medium text-muted hover:bg-elevated hover:text-ink", pathname === to && "bg-elevated text-cyan")}>{text}</Link>)}
         </nav>
         <div className="ml-auto flex items-center gap-3">
           {config.useMocks && <span className="hidden rounded border border-amber/30 bg-amber/10 px-2 py-1 text-[10px] font-bold tracking-wider text-amber sm:block">DEMO DATA</span>}
@@ -44,7 +46,7 @@ export function AppHeader() {
           <button className="rounded p-2 text-muted hover:bg-elevated hover:text-ink lg:hidden" onClick={() => setMenu((value) => !value)} aria-label={menu ? "Close navigation" : "Open navigation"} aria-expanded={menu}>{menu ? <X /> : <Menu />}</button>
         </div>
       </div>
-      {menu && <nav className="border-t border-line p-2 lg:hidden" aria-label="Mobile navigation">{links.map(([to, text]) => <NavLink key={to} to={to} onClick={() => setMenu(false)} className={({ isActive }) => cx("block rounded px-3 py-2 text-sm text-muted", isActive && "bg-elevated text-cyan")}>{text}</NavLink>)}</nav>}
+      {menu && <nav className="border-t border-line p-2 lg:hidden" aria-label="Mobile navigation">{links.map(([to, text]) => <Link key={to} to={to} onClick={() => setMenu(false)} aria-current={pathname === to ? "page" : undefined} className={cx("block rounded px-3 py-2 text-sm text-muted", pathname === to && "bg-elevated text-cyan")}>{text}</Link>)}</nav>}
     </header>
   );
 }

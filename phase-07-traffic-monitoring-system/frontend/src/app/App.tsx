@@ -1,15 +1,27 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { AppLayout } from "../components/layout/AppLayout";
 import { AnalyticsPage } from "../pages/AnalyticsPage";
 import { DashboardPage } from "../pages/DashboardPage";
 import { HistoryPage } from "../pages/HistoryPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { LiveProvider } from "./LiveContext";
+import { usePathname } from "./router";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 10_000, retry: 1, refetchOnWindowFocus: false } } });
-const router = createBrowserRouter([{ path: "/", element: <AppLayout />, children: [{ index: true, element: <DashboardPage /> }, { path: "history", element: <HistoryPage /> }, { path: "analytics", element: <AnalyticsPage /> }, { path: "*", element: <NotFoundPage /> }] }]);
+
+function CurrentPage() {
+  const pathname = usePathname().replace(/\/+$/, "") || "/";
+  const page = pathname === "/"
+    ? <DashboardPage />
+    : pathname === "/history"
+      ? <HistoryPage />
+      : pathname === "/analytics"
+        ? <AnalyticsPage />
+        : <NotFoundPage />;
+
+  return <AppLayout>{page}</AppLayout>;
+}
 
 export function App() {
-  return <QueryClientProvider client={queryClient}><LiveProvider><RouterProvider router={router} /></LiveProvider></QueryClientProvider>;
+  return <QueryClientProvider client={queryClient}><LiveProvider><CurrentPage /></LiveProvider></QueryClientProvider>;
 }

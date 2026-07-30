@@ -150,6 +150,8 @@ class Dashboard:
         self._build_header()
         self._build_content()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
+        self.root.bind("<q>", lambda _event: self.close())
+        self.root.bind("<Q>", lambda _event: self.close())
         self.root.bind("<Configure>", self._schedule_responsive_update)
         self._tick_clock()
         self.root.after_idle(self._apply_responsive_layout)
