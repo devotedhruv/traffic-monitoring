@@ -21,5 +21,8 @@ export const endpoints = {
   vehicle: (id: number) => `/api/vehicles/${id}`,
   analytics: "/api/analytics",
   cameras: "/api/cameras",
-  stream: (cameraId: string) => `/api/cameras/${encodeURIComponent(cameraId)}/stream`
+  stream: (cameraId: string) => `/api/cameras/${encodeURIComponent(cameraId)}/stream`,
+  videoAnalysis: "/api/video-analysis",
+  videoAnalysisLink: "/api/video-analysis/link",
+  videoAnalysisJob: (jobId: string) => `/api/video-analysis/${encodeURIComponent(jobId)}`
 };

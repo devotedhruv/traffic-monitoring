@@ -48,9 +48,16 @@ class TrafficApiTests(unittest.TestCase):
         self.assertEqual(cameras[0]["id"], "camera-01")
 
     def test_routes_are_registered(self):
-        paths = {route.path for route in api.app.routes}
+        paths = {
+            route.path for route in api.app.routes
+            if getattr(route, "path", None)
+        }
+        paths.update(api.app.openapi()["paths"])
         self.assertIn("/api/vehicles", paths)
         self.assertIn("/api/cameras/{camera_id}/stream", paths)
+        self.assertIn("/api/video-analysis", paths)
+        self.assertIn("/api/video-analysis/link", paths)
+        self.assertIn("/api/video-analysis/{job_id}", paths)
         self.assertIn("/ws/live", paths)
 
 

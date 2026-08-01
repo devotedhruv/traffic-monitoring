@@ -3,9 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#080b12" />
+    <meta name="theme-color" content="#F7FAF8" />
     <meta name="description" content="TrafficOps AI traffic monitoring control room" />
-    <title>TrafficOps</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%2316a34a'/%3E%3Cpath d='M5 17h5l2-7 4 14 3-9 2 4h6' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <title>TrafficOps AI</title>
+    <script>
+      (() => {
+        try {
+          const saved = localStorage.getItem("trafficops-theme") || "system";
+          const dark = saved === "dark" || (saved === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.classList.toggle("dark", dark);
+          document.documentElement.dataset.theme = dark ? "dark" : "light";
+          document.documentElement.style.colorScheme = dark ? "dark" : "light";
+          document.querySelector('meta[name="theme-color"]').content = dark ? "#07100D" : "#F7FAF8";
+        } catch (_) { /* use the light theme fallback */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

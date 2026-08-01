@@ -5,7 +5,7 @@ The Phase 7 application now has two runtime surfaces:
 - the original Tkinter program in `src/main.py`;
 - the web-connected FastAPI runtime in `run_web.py`.
 
-The FastAPI runtime owns one YOLO/ByteTrack processing worker and exposes its output through REST, MJPEG, and WebSocket. The React frontend consumes those interfaces; it never reads SQLite or Python process memory directly.
+The FastAPI runtime owns one YOLO/ByteTrack processing worker and exposes its output through REST, MJPEG, and WebSocket. The React frontend consumes those interfaces; it never reads SQLite or Python process memory directly. A separate single-file worker can also analyze manually uploaded road footage or one public video link without writing its results to the live SQLite history.
 
 ## Local development
 
@@ -64,7 +64,14 @@ Do not commit real camera credentials. Use a deployment secret manager in produc
 - `GET /api/analytics?range=today`
 - `GET /api/cameras`
 - `GET /api/cameras/{camera_id}/stream`
+- `POST /api/video-analysis` with a raw video body and filename/calibration query parameters
+- `POST /api/video-analysis/link` with a public link, rights confirmation, and calibration JSON
+- `GET /api/video-analysis/{job_id}`
 - `WS /ws/live`
+
+Uploaded and linked videos are limited to 500 MB by default, are processed from temporary storage, and are deleted when the analysis completes or fails. Linked videos are also limited to 120 minutes. Completed reports remain in process memory for six hours and are lost when the backend restarts.
+
+Link ingestion accepts a single public video from an allowlisted source such as YouTube, Google Drive, Instagram, TikTok, Facebook, X, Vimeo, Twitch, Reddit, Loom, Dropbox, or OneDrive. It does not use cookies or credentials, and it rejects playlists, folders, live streams, private URLs, and private-network destinations. Extend the host allowlist for another trusted yt-dlp source with a comma-separated `TRAFFIC_ALLOWED_VIDEO_LINK_HOSTS` value.
 
 ## Speed calibration
 

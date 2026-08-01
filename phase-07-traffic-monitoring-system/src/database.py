@@ -99,6 +99,8 @@ def list_vehicles(
     vehicle_type: str = "",
     search: str = "",
     sort: str = "time_desc",
+    speed_filter: str = "",
+    date_filter: str = "",
 ) -> dict[str, Any]:
     clauses: list[str] = []
     values: list[Any] = []
@@ -112,6 +114,17 @@ def list_vehicles(
         clauses.append("(LOWER(COALESCE(plate, '')) LIKE ? OR CAST(COALESCE(tracking_id, id) AS TEXT) LIKE ?)")
         needle = f"%{search.lower()}%"
         values.extend([needle, needle])
+    if speed_filter == "over_limit":
+        clauses.append("speed > ?")
+        values.append(SPEED_LIMIT)
+    elif speed_filter == "under_limit":
+        clauses.append("speed <= ?")
+        values.append(SPEED_LIMIT)
+    if date_filter:
+        now = datetime.now(timezone.utc)
+        start = now - (timedelta(days=7) if date_filter == "week" else timedelta(days=1))
+        clauses.append("time >= ?")
+        values.append(start.strftime("%Y-%m-%d %H:%M:%S"))
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     orders = {
         "time_desc": "time DESC, id DESC", "time_asc": "time ASC, id ASC",

@@ -14,6 +14,7 @@ from src.database import (
     analytics, create_database, dashboard_summary, get_vehicle, list_vehicles,
 )
 from web.runtime import broker, next_event, runtime
+from web.video_analysis import router as video_analysis_router
 
 
 @asynccontextmanager
@@ -35,9 +36,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+app.include_router(video_analysis_router)
 
 
 @app.get("/api/health")
@@ -63,8 +65,10 @@ def vehicles(
     type: Literal["", "car", "motorcycle", "bus", "truck", "unknown"] = "",
     search: Annotated[str, Query(max_length=100)] = "",
     sort: Literal["time_desc", "time_asc", "speed_desc", "speed_asc"] = "time_desc",
+    speed: Literal["", "under_limit", "over_limit"] = "",
+    date: Literal["", "today", "week"] = "",
 ):
-    return list_vehicles(page, pageSize, status, type, search, sort)
+    return list_vehicles(page, pageSize, status, type, search, sort, speed, date)
 
 
 @app.get("/api/vehicles/{vehicle_id}")
