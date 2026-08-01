@@ -27,7 +27,7 @@ from alert_system import check_speed
 from dashboard import Dashboard
 from database import create_database, save_vehicle
 
-from config.settings import MODEL_PATH, VIDEO_PATH, SPEED_LIMIT
+from config.settings import MODEL_PATH, SPEED_LIMIT, TRACKER_CONFIG, VIDEO_PATH
 
 
 logging.basicConfig(
@@ -62,7 +62,7 @@ def draw_fps(frame, fps: float, position=(50, 90)):
 def process_frame(frame, model, speed_manager, dashboard, saved_vehicles):
     """Run detection/tracking on a single frame, update UI + DB, return the
     annotated frame ready for display."""
-    results = model.track(frame, persist=True, tracker="bytetrack.yaml")
+    results = model.track(source=frame, persist=True, tracker=TRACKER_CONFIG)
     output = results[0].plot()
 
     boxes = results[0].boxes

@@ -4,6 +4,24 @@ export type VehicleType = "car" | "motorcycle" | "bus" | "truck" | "unknown";
 export type AnalyticsRange = "hour" | "today" | "week";
 export type VideoAnalysisStatus = "queued" | "processing" | "completed" | "failed";
 
+export interface NormalizedPoint {
+  x: number;
+  y: number;
+}
+
+export interface RoadCalibration {
+  enabled: boolean;
+  sourcePoints: NormalizedPoint[];
+  roadWidthMeters: number;
+  roadLengthMeters: number;
+  laneCount: number;
+  countingLinePosition: number;
+  stabilize: boolean;
+  analysisFps: number;
+  tracker: "botsort.yaml" | "bytetrack.yaml";
+  allowedDirection: "both" | "approaching" | "moving_away" | "left_to_right" | "right_to_left";
+}
+
 export interface VehicleDetection {
   id: number;
   trackingId: number;
@@ -81,6 +99,7 @@ export interface VideoAnalysisOptions {
   location: string;
   speedLimit: number;
   metersPerPixel: number;
+  calibration?: RoadCalibration;
 }
 
 export interface VideoLinkAnalysisOptions extends VideoAnalysisOptions {
@@ -92,18 +111,23 @@ export interface AnalyzedVehicle {
   trackingId: number;
   vehicleType: string;
   color: string;
-  plate: null;
-  plateStatus: "NOT_AVAILABLE";
+  plate: string | null;
+  plateStatus: "NOT_AVAILABLE" | "RECOGNIZED";
+  plateConfidence: number | null;
+  lane: number | null;
   confidence: number;
   firstSeenSeconds: number;
   lastSeenSeconds: number;
+  countedAtSeconds: number | null;
   trackedForSeconds: number;
   framesTracked: number;
   estimatedSpeed: number | null;
   peakSpeed: number | null;
+  speedConfidence: "LOW" | "MEDIUM" | "HIGH";
   speedLimit: number;
   status: "NORMAL" | "OVERSPEED" | "INSUFFICIENT_DATA";
   direction: string;
+  violations: string[];
 }
 
 export interface VideoAnalysisResult {
@@ -126,6 +150,7 @@ export interface VideoAnalysisResult {
   };
   summary: {
     totalVehicles: number;
+    lineCrossingVehicles: number;
     overspeedVehicles: number;
     averageSpeed: number | null;
     maxSpeed: number | null;
@@ -141,15 +166,34 @@ export interface VideoAnalysisResult {
     overspeed: number;
   }[];
   vehicles: AnalyzedVehicle[];
+  artifacts: {
+    annotatedVideoUrl: string | null;
+    frameRate: number;
+    containsSampledFrames: boolean;
+  };
+  capabilities: Record<string, {
+    available: boolean;
+    model?: string;
+    method?: string;
+    reason?: string | null;
+  }>;
   analysis: {
     completedAt: string;
     processingSeconds: number;
     model: string;
+    tracker: string;
     sampleEveryFrames: number;
+    analysisFps: number;
     calibrationMetersPerPixel: number;
+    perspectiveCalibrated: boolean;
+    roadWidthMeters: number | null;
+    roadLengthMeters: number | null;
+    laneCount: number | null;
     speedMethod: string;
     speedIsEstimated: true;
-    plateRecognitionAvailable: false;
+    stabilizationEnabled: boolean;
+    stabilizedFrames: number;
+    plateRecognitionAvailable: boolean;
     note: string;
   };
 }

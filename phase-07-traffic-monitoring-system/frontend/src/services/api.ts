@@ -32,6 +32,7 @@ async function startVideoAnalysis(file: File, options: VideoAnalysisOptions) {
     speedLimit: String(options.speedLimit),
     metersPerPixel: String(options.metersPerPixel)
   });
+  if (options.calibration) params.set("calibration", JSON.stringify(options.calibration));
   const response = await fetch(`${config.apiBaseUrl}${endpoints.videoAnalysis}?${params}`, {
     method: "POST",
     headers: {
@@ -82,5 +83,6 @@ export const api = {
   startVideoAnalysis,
   startLinkVideoAnalysis,
   getVideoAnalysis: (jobId: string) =>
-    request<VideoAnalysisJob>(endpoints.videoAnalysisJob(jobId))
+    request<VideoAnalysisJob>(endpoints.videoAnalysisJob(jobId)),
+  resolveApiUrl: (path: string) => path.startsWith("http") ? path : `${config.apiBaseUrl}${path}`
 };

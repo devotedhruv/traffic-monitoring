@@ -58,6 +58,7 @@ class TrafficApiTests(unittest.TestCase):
         self.assertIn("/api/video-analysis", paths)
         self.assertIn("/api/video-analysis/link", paths)
         self.assertIn("/api/video-analysis/{job_id}", paths)
+        self.assertIn("/api/video-analysis/{job_id}/video", paths)
         self.assertIn("/ws/live", paths)
 
 

@@ -13,7 +13,8 @@ from typing import Any
 import cv2
 
 from config.settings import (
-    CAMERA_ID, CAMERA_NAME, METERS_PER_PIXEL, MODEL_PATH, SPEED_LIMIT, VIDEO_SOURCE,
+    CAMERA_ID, CAMERA_NAME, METERS_PER_PIXEL, MODEL_PATH, SPEED_LIMIT, TRACKER_CONFIG,
+    VIDEO_SOURCE,
 )
 from src.database import save_vehicle, update_vehicle_measurement
 
@@ -156,7 +157,13 @@ class TrafficRuntime:
                     raise RuntimeError("Camera disconnected")
 
                 now = time.monotonic()
-                result = model.track(frame, persist=True, tracker="bytetrack.yaml", verbose=False)[0]
+                result = model.track(
+                    source=frame,
+                    persist=True,
+                    tracker=TRACKER_CONFIG,
+                    conf=0.25,
+                    verbose=False,
+                )[0]
                 output = result.plot()
                 boxes = result.boxes
                 if boxes is not None and boxes.id is not None:
@@ -168,7 +175,7 @@ class TrafficRuntime:
                         if vehicle_type not in VEHICLE_CLASSES:
                             continue
                         x1, y1, x2, y2 = box_raw
-                        speed = speed_tracker.update(track_id, ((x1 + x2) / 2, (y1 + y2) / 2), now)
+                        speed = speed_tracker.update(track_id, ((x1 + x2) / 2, y2), now)
                         status = "OVERSPEED" if speed > SPEED_LIMIT else "NORMAL"
                         color = (0, 0, 255) if status == "OVERSPEED" else (0, 210, 120)
                         cv2.putText(output, f"{speed:.1f} km/h", (int(x1), max(20, int(y1) - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)

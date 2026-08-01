@@ -1,9 +1,10 @@
-"""YOLO detector/ByteTrack adapter returning normalized vehicle observations."""
+"""YOLO detector/tracker adapter returning normalized vehicle observations."""
 
 from __future__ import annotations
 
 from typing import Any
 
+from config.settings import TRACKER_CONFIG
 from services.types import BoundingBox, VehicleObservation
 
 DEFAULT_VEHICLE_CLASSES = {
@@ -15,7 +16,7 @@ class VehicleDetector:
     def __init__(
         self,
         model: Any,
-        tracker_config: str = "bytetrack.yaml",
+        tracker_config: str = TRACKER_CONFIG,
         confidence_threshold: float = 0.3,
         supported_classes: set[str] | None = None,
     ):
@@ -26,7 +27,7 @@ class VehicleDetector:
 
     def detect(self, frame: Any) -> list[VehicleObservation]:
         result = self.model.track(
-            frame,
+            source=frame,
             persist=True,
             tracker=self.tracker_config,
             conf=self.confidence_threshold,
@@ -50,4 +51,3 @@ class VehicleDetector:
                 bounding_box=BoundingBox(*map(float, coordinates)),
             ))
         return observations
-

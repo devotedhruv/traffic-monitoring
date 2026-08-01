@@ -1,9 +1,10 @@
-import { Activity, CarFront, Clock3, Gauge, Info, MapPin, Palette, Radar, ShieldAlert } from "lucide-react";
+import { Activity, CarFront, CheckCircle2, Clock3, Gauge, Info, MapPin, Palette, Radar, ShieldAlert, Video, XCircle } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { MetricCard } from "../dashboard/MetricCard";
 import { Panel } from "../../components/ui/Panel";
 import { EmptyState } from "../../components/ui/States";
 import { cx, formatBytes, formatDuration, formatSpeed, titleCase } from "../../lib/format";
+import { api } from "../../services/api";
 import type { AnalyzedVehicle, VideoAnalysisResult } from "../../types";
 
 const tooltipStyle = {
@@ -88,15 +89,36 @@ export function AnalysisResults({ result }: { result: VideoAnalysisResult }) {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Unique vehicles" value={summary.totalVehicles} note="Tracked across the video" icon={CarFront} />
+        <MetricCard label="Validated vehicles" value={summary.totalVehicles} note={`${summary.lineCrossingVehicles} crossed the count line`} icon={CarFront} />
         <MetricCard label="Overspeed" value={summary.overspeedVehicles} note={`Estimated above ${formatSpeed(summary.speedLimit)} km/h`} icon={ShieldAlert} tone="danger" />
         <MetricCard label="Average speed" value={summary.averageSpeed === null ? "—" : formatSpeed(summary.averageSpeed)} note="km/h · calibrated estimate" icon={Gauge} tone="amber" />
         <MetricCard label="Maximum speed" value={summary.maxSpeed === null ? "—" : formatSpeed(summary.maxSpeed)} note="km/h · per-vehicle estimate" icon={Radar} tone="success" />
       </div>
 
-      <div className="flex gap-3 rounded-2xl border border-primary/20 bg-primary-soft p-4 text-sm text-secondary">
+      <div className={cx("flex gap-3 rounded-2xl border p-4 text-sm text-secondary", analysis.perspectiveCalibrated ? "border-primary/20 bg-primary-soft" : "border-warning/30 bg-warning/10")}>
         <Info className="mt-0.5 shrink-0 text-primary" size={18} />
-        <div><p className="font-bold">Speed calibration matters</p><p className="mt-1 text-xs leading-5 text-muted">{analysis.note} Current scale: {analysis.calibrationMetersPerPixel} metres per pixel.</p></div>
+        <div><p className="font-bold">{analysis.perspectiveCalibrated ? "Perspective-calibrated speed" : "Low-confidence fallback speed"}</p><p className="mt-1 text-xs leading-5 text-muted">{analysis.note}{!analysis.perspectiveCalibrated && ` Current fallback: ${analysis.calibrationMetersPerPixel} metres per pixel.`}</p></div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(300px,.65fr)]">
+        <Panel title="Annotated verification video">
+          {result.artifacts.annotatedVideoUrl ? (
+            <div className="p-3">
+              <video controls preload="metadata" className="aspect-video w-full rounded-xl bg-black object-contain" src={api.resolveApiUrl(result.artifacts.annotatedVideoUrl)} aria-label="Annotated analysis output with vehicle tracks, calibrated road region, and count line" />
+              <p className="mt-2 flex items-center gap-2 text-[10px] text-muted"><Video size={13} className="text-primary" />{result.artifacts.frameRate.toFixed(1)} FPS evidence output{result.artifacts.containsSampledFrames ? " · sampled frames" : ""}</p>
+            </div>
+          ) : <EmptyState title="Annotated output unavailable" message="The video codec could not produce a browser-playable verification file." />}
+        </Panel>
+        <Panel title="Analysis capabilities">
+          <div className="divide-y divide-line px-4">
+            {Object.entries(result.capabilities).map(([name, capability]) => (
+              <div key={name} className="flex items-start gap-3 py-3">
+                {capability.available ? <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-success" /> : <XCircle size={16} className="mt-0.5 shrink-0 text-muted" />}
+                <div className="min-w-0"><p className="text-xs font-bold">{titleCase(name.replace(/([A-Z])/g, " $1"))}</p><p className="mt-1 text-[10px] leading-4 text-muted">{capability.available ? capability.model || capability.method || "Enabled" : capability.reason || "Not configured"}</p></div>
+              </div>
+            ))}
+          </div>
+        </Panel>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.7fr)]">
@@ -145,19 +167,19 @@ export function AnalysisResults({ result }: { result: VideoAnalysisResult }) {
             <div className="hidden max-h-[560px] overflow-auto lg:block scrollbar-thin">
               <table className="w-full min-w-[1050px] border-collapse text-left text-sm">
                 <thead className="sticky top-0 z-10 bg-elevated text-[10px] uppercase tracking-wider text-muted">
-                  <tr>{["Track", "Type", "Colour", "First seen", "Visible for", "Direction", "Confidence", "Est. speed", "Peak", "Status"].map((heading) => <th key={heading} className="border-b border-line px-4 py-3 font-bold">{heading}</th>)}</tr>
+                  <tr>{["Track", "Type / plate", "Colour", "Counted", "Visible for", "Direction", "Confidence", "Est. speed", "Peak", "Status"].map((heading) => <th key={heading} className="border-b border-line px-4 py-3 font-bold">{heading}</th>)}</tr>
                 </thead>
                 <tbody className="divide-y divide-line">
                   {result.vehicles.map((vehicle) => (
                     <tr key={vehicle.trackingId} className="hover:bg-elevated/50">
                       <td className="px-4 py-3 font-bold tabular-nums text-cyan">#{vehicle.trackingId}</td>
-                      <td className="px-4 py-3 font-semibold">{titleCase(vehicle.vehicleType)}</td>
+                      <td className="px-4 py-3 font-semibold">{titleCase(vehicle.vehicleType)}{vehicle.lane && <small className="mt-1 block text-muted">Lane {vehicle.lane}</small>}{vehicle.plate && <small className="mt-1 block font-mono text-cyan">{vehicle.plate}</small>}</td>
                       <td className="px-4 py-3 text-muted">{titleCase(vehicle.color)}</td>
-                      <td className="px-4 py-3 tabular-nums">{formatDuration(vehicle.firstSeenSeconds)}</td>
+                      <td className="px-4 py-3 tabular-nums">{vehicle.countedAtSeconds === null ? "—" : formatDuration(vehicle.countedAtSeconds)}</td>
                       <td className="px-4 py-3 tabular-nums text-muted">{vehicle.trackedForSeconds.toFixed(1)}s</td>
                       <td className="px-4 py-3 text-muted">{vehicle.direction}</td>
                       <td className="px-4 py-3 tabular-nums">{Math.round(vehicle.confidence * 100)}%</td>
-                      <td className="px-4 py-3 font-semibold tabular-nums">{vehicle.estimatedSpeed === null ? "—" : `${formatSpeed(vehicle.estimatedSpeed)} km/h`}</td>
+                      <td className="px-4 py-3 font-semibold tabular-nums">{vehicle.estimatedSpeed === null ? "—" : `${formatSpeed(vehicle.estimatedSpeed)} km/h`}<small className="mt-1 block text-[9px] text-muted">{vehicle.speedConfidence} confidence</small></td>
                       <td className="px-4 py-3 tabular-nums text-muted">{vehicle.peakSpeed === null ? "—" : `${formatSpeed(vehicle.peakSpeed)} km/h`}</td>
                       <td className="px-4 py-3"><ResultBadge status={vehicle.status} /></td>
                     </tr>

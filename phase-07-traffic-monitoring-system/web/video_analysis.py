@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import json
 import ipaddress
 import mimetypes
 import shutil
@@ -23,9 +24,11 @@ from urllib.parse import urlparse
 import cv2
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query, Request, status
-from pydantic import BaseModel, Field
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field, ValidationError
 
 from config.settings import METERS_PER_PIXEL, MODEL_PATH, SPEED_LIMIT
+from web.traffic_pipeline import CalibrationSettings, analyze_video as analyze_calibrated_video
 
 log = logging.getLogger("trafficops.video_analysis")
 
@@ -65,6 +68,7 @@ class LinkAnalysisRequest(BaseModel):
     speedLimit: float = Field(default=SPEED_LIMIT, ge=5, le=200)
     metersPerPixel: float = Field(default=METERS_PER_PIXEL, gt=0.0001, le=10)
     confirmedRights: bool = False
+    calibration: CalibrationSettings | None = None
 
 
 @dataclass
@@ -126,6 +130,13 @@ class _JobStore:
                 return None
             return {key: value for key, value in job.items() if not key.startswith("_")}
 
+    def artifact_path(self, job_id: str) -> str | None:
+        self._purge()
+        with self._lock:
+            job = self._jobs.get(job_id)
+            path = job.get("_outputPath") if job else None
+            return str(path) if path else None
+
     def _purge(self) -> None:
         cutoff = time.time() - JOB_TTL_SECONDS
         with self._lock:
@@ -135,11 +146,26 @@ class _JobStore:
                 if job.get("_updated", 0) < cutoff
             ]
             for job_id in expired:
-                self._jobs.pop(job_id, None)
+                job = self._jobs.pop(job_id, None)
+                if job and job.get("_outputPath"):
+                    Path(str(job["_outputPath"])).unlink(missing_ok=True)
 
 
 jobs = _JobStore()
 _analysis_gate = threading.Lock()
+
+
+def _parse_calibration(value: str | None) -> CalibrationSettings | None:
+    if not value:
+        return None
+    try:
+        payload = json.loads(value)
+        return CalibrationSettings.model_validate(payload)
+    except (json.JSONDecodeError, ValidationError, TypeError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Road calibration is invalid. Mark four road points and check its measurements.",
+        ) from exc
 
 
 @router.post("", status_code=status.HTTP_202_ACCEPTED)
@@ -151,6 +177,7 @@ async def start_video_analysis(
     meters_per_pixel: Annotated[
         float, Query(alias="metersPerPixel", gt=0.0001, le=10)
     ] = METERS_PER_PIXEL,
+    calibration: Annotated[str | None, Query(max_length=4096)] = None,
 ):
     """Accept a raw video body and queue it without touching live or historical data."""
     extension = Path(filename).suffix.lower()
@@ -165,6 +192,7 @@ async def start_video_analysis(
         content_type.startswith("video/") or content_type == "application/octet-stream"
     ):
         raise HTTPException(status_code=415, detail="The uploaded file must be a video")
+    calibration_settings = _parse_calibration(calibration)
 
     content_length = request.headers.get("content-length")
     if content_length:
@@ -207,6 +235,7 @@ async def start_video_analysis(
             location.strip(),
             float(speed_limit),
             float(meters_per_pixel),
+            calibration_settings,
         ),
         name=f"video-analysis-{job_id[:8]}",
         daemon=True,
@@ -234,6 +263,7 @@ def start_link_video_analysis(payload: LinkAnalysisRequest):
             payload.location.strip(),
             float(payload.speedLimit),
             float(payload.metersPerPixel),
+            payload.calibration,
         ),
         name=f"link-analysis-{job_id[:8]}",
         daemon=True,
@@ -250,6 +280,19 @@ def get_video_analysis(job_id: str):
     return job
 
 
+@router.get("/{job_id}/video")
+def get_annotated_video(job_id: str):
+    """Stream the temporary annotated evidence video for a completed job."""
+    path = jobs.artifact_path(job_id)
+    if not path or not Path(path).is_file():
+        raise HTTPException(status_code=404, detail="Annotated video is not available")
+    return FileResponse(
+        path,
+        media_type="video/mp4",
+        filename=f"trafficops-{job_id[:8]}-annotated.mp4",
+    )
+
+
 def _run_analysis_job(
     job_id: str,
     path: str,
@@ -259,6 +302,7 @@ def _run_analysis_job(
     location: str,
     speed_limit: float,
     meters_per_pixel: float,
+    calibration: CalibrationSettings | None,
 ) -> None:
     try:
         with _analysis_gate:
@@ -268,15 +312,19 @@ def _run_analysis_job(
                 progress=2,
                 stage="Reading video metadata",
             )
-            result = _analyze_video(
-                job_id,
-                path,
-                filename,
-                content_type,
-                size,
-                location,
-                speed_limit,
-                meters_per_pixel,
+            result, artifact_path = analyze_calibrated_video(
+                path=path,
+                filename=filename,
+                content_type=content_type,
+                size=size,
+                location=location,
+                speed_limit=speed_limit,
+                meters_per_pixel=meters_per_pixel,
+                calibration=calibration,
+                progress=lambda value, stage: jobs.update(
+                    job_id, progress=value, stage=stage
+                ),
+                artifact_url=f"/api/video-analysis/{job_id}/video",
             )
             jobs.update(
                 job_id,
@@ -284,6 +332,7 @@ def _run_analysis_job(
                 progress=100,
                 stage="Analysis complete",
                 result=result,
+                _outputPath=artifact_path,
             )
     except Exception as exc:
         log.exception("Uploaded video analysis failed for job %s", job_id)
@@ -304,6 +353,7 @@ def _run_link_analysis_job(
     location: str,
     speed_limit: float,
     meters_per_pixel: float,
+    calibration: CalibrationSettings | None,
 ) -> None:
     temporary_directory = ""
     try:
@@ -325,17 +375,22 @@ def _run_link_analysis_job(
                 progress=28,
                 stage="Preparing downloaded video for analysis",
             )
-            result = _analyze_video(
-                job_id,
-                str(path),
-                filename,
-                mimetypes.guess_type(path.name)[0] or "application/octet-stream",
-                path.stat().st_size,
-                location,
-                speed_limit,
-                meters_per_pixel,
+            result, artifact_path = analyze_calibrated_video(
+                path=str(path),
+                filename=filename,
+                content_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+                size=path.stat().st_size,
+                location=location,
+                speed_limit=speed_limit,
+                meters_per_pixel=meters_per_pixel,
+                calibration=calibration,
+                progress=lambda value, stage: jobs.update(
+                    job_id,
+                    progress=_scaled_progress(value, 28),
+                    stage=stage,
+                ),
+                artifact_url=f"/api/video-analysis/{job_id}/video",
                 source_metadata=source,
-                progress_base=28,
             )
             jobs.update(
                 job_id,
@@ -343,6 +398,7 @@ def _run_link_analysis_job(
                 progress=100,
                 stage="Analysis complete",
                 result=result,
+                _outputPath=artifact_path,
             )
     except Exception as exc:
         log.exception("Linked video analysis failed for job %s", job_id)

@@ -9,7 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg libglib2.0-0 libgl1 \
+    && apt-get install -y --no-install-recommends ffmpeg libglib2.0-0 libgl1 tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node

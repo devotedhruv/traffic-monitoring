@@ -32,7 +32,19 @@ describe("API configuration", () => {
     await api.startVideoAnalysis(file, {
       location: "Ring Road",
       speedLimit: 50,
-      metersPerPixel: 0.05
+      metersPerPixel: 0.05,
+      calibration: {
+        enabled: true,
+        sourcePoints: [{ x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 }, { x: 0.9, y: 0.9 }, { x: 0.1, y: 0.9 }],
+        roadWidthMeters: 8,
+        roadLengthMeters: 30,
+        laneCount: 2,
+        countingLinePosition: 0.62,
+        stabilize: true,
+        analysisFps: 15,
+        tracker: "botsort.yaml",
+        allowedDirection: "both"
+      }
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -40,6 +52,7 @@ describe("API configuration", () => {
       expect.objectContaining({ method: "POST", body: file })
     );
     expect(fetchMock.mock.calls[0][0]).toContain("filename=road+clip.mp4");
+    expect(fetchMock.mock.calls[0][0]).toContain("calibration=");
     vi.unstubAllGlobals();
   });
 
