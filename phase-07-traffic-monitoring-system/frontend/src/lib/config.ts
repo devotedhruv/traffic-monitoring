@@ -15,11 +15,18 @@ export const config = {
 };
 
 export const endpoints = {
+  signUp: "/api/auth/signup",
+  signIn: "/api/auth/signin",
+  signOut: "/api/auth/signout",
+  me: "/api/auth/me",
   health: "/api/health",
   summary: "/api/dashboard/summary",
   vehicles: "/api/vehicles",
   vehicle: (id: number) => `/api/vehicles/${id}`,
   analytics: "/api/analytics",
   cameras: "/api/cameras",
-  stream: (cameraId: string) => `/api/cameras/${encodeURIComponent(cameraId)}/stream`
+  stream: (cameraId: string) => `/api/cameras/${encodeURIComponent(cameraId)}/stream`,
+  videoAnalysis: "/api/video-analysis",
+  videoAnalysisLink: "/api/video-analysis/link",
+  videoAnalysisJob: (jobId: string) => `/api/video-analysis/${encodeURIComponent(jobId)}`
 };

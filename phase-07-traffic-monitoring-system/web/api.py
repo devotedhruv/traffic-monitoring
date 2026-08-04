@@ -5,15 +5,17 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from config.settings import ALLOWED_ORIGINS, CAMERA_ID, CAMERA_NAME
+from config.settings import ALLOWED_ORIGINS, AUTH_COOKIE_NAME, CAMERA_ID, CAMERA_NAME
 from src.database import (
     analytics, create_database, dashboard_summary, get_vehicle, list_vehicles,
 )
 from web.runtime import broker, next_event, runtime
+from web.auth import current_user_from_token, require_user, router as auth_router
+from web.video_analysis import router as video_analysis_router
 
 
 @asynccontextmanager
@@ -35,9 +37,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+app.include_router(auth_router)
+app.include_router(video_analysis_router, dependencies=[Depends(require_user)])
 
 
 @app.get("/api/health")
@@ -50,12 +54,12 @@ def health():
     }
 
 
-@app.get("/api/dashboard/summary")
+@app.get("/api/dashboard/summary", dependencies=[Depends(require_user)])
 def summary():
     return dashboard_summary(runtime.fps)
 
 
-@app.get("/api/vehicles")
+@app.get("/api/vehicles", dependencies=[Depends(require_user)])
 def vehicles(
     page: Annotated[int, Query(ge=1)] = 1,
     pageSize: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -63,11 +67,13 @@ def vehicles(
     type: Literal["", "car", "motorcycle", "bus", "truck", "unknown"] = "",
     search: Annotated[str, Query(max_length=100)] = "",
     sort: Literal["time_desc", "time_asc", "speed_desc", "speed_asc"] = "time_desc",
+    speed: Literal["", "under_limit", "over_limit"] = "",
+    date: Literal["", "today", "week"] = "",
 ):
-    return list_vehicles(page, pageSize, status, type, search, sort)
+    return list_vehicles(page, pageSize, status, type, search, sort, speed, date)
 
 
-@app.get("/api/vehicles/{vehicle_id}")
+@app.get("/api/vehicles/{vehicle_id}", dependencies=[Depends(require_user)])
 def vehicle(vehicle_id: int):
     result = get_vehicle(vehicle_id)
     if result is None:
@@ -75,12 +81,12 @@ def vehicle(vehicle_id: int):
     return result
 
 
-@app.get("/api/analytics")
+@app.get("/api/analytics", dependencies=[Depends(require_user)])
 def analytics_endpoint(range: Literal["hour", "today", "week"] = "today"):
     return analytics(range)
 
 
-@app.get("/api/cameras")
+@app.get("/api/cameras", dependencies=[Depends(require_user)])
 def cameras():
     return [{
         "id": CAMERA_ID, "name": CAMERA_NAME,
@@ -96,7 +102,7 @@ def mjpeg_frames():
             yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
 
 
-@app.get("/api/cameras/{camera_id}/stream")
+@app.get("/api/cameras/{camera_id}/stream", dependencies=[Depends(require_user)])
 def camera_stream(camera_id: str):
     if camera_id != CAMERA_ID:
         raise HTTPException(status_code=404, detail="Camera not found")
@@ -107,6 +113,9 @@ def camera_stream(camera_id: str):
 
 @app.websocket("/ws/live")
 async def live_socket(websocket: WebSocket):
+    if current_user_from_token(websocket.cookies.get(AUTH_COOKIE_NAME)) is None:
+        await websocket.close(code=4401, reason="Authentication required")
+        return
     await websocket.accept()
     await websocket.send_json({"type": "system_status", "data": {
         "connection": "connected" if runtime.running else "offline",

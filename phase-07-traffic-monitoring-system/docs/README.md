@@ -5,7 +5,7 @@ The Phase 7 application now has two runtime surfaces:
 - the original Tkinter program in `src/main.py`;
 - the web-connected FastAPI runtime in `run_web.py`.
 
-The FastAPI runtime owns one YOLO/ByteTrack processing worker and exposes its output through REST, MJPEG, and WebSocket. The React frontend consumes those interfaces; it never reads SQLite or Python process memory directly.
+The FastAPI runtime owns one YOLO tracking worker and exposes its output through REST, MJPEG, and WebSocket. The React frontend consumes those interfaces; it never reads SQLite or Python process memory directly. A separate single-file worker analyzes uploaded road footage or one public video link without writing its results to live SQLite history. Upload analysis uses YOLO11s, BoT-SORT, track lifecycle validation, optional feature-based camera stabilization, four-point road-plane calibration, line crossing, ground-plane speed trajectories, and temporary annotated evidence video.
 
 ## Local development
 
@@ -64,19 +64,56 @@ Do not commit real camera credentials. Use a deployment secret manager in produc
 - `GET /api/analytics?range=today`
 - `GET /api/cameras`
 - `GET /api/cameras/{camera_id}/stream`
+- `POST /api/video-analysis` with a raw video body and filename/calibration query parameters
+- `POST /api/video-analysis/link` with a public link, rights confirmation, and calibration JSON
+- `GET /api/video-analysis/{job_id}`
+- `GET /api/video-analysis/{job_id}/video` for the temporary annotated H.264 result
 - `WS /ws/live`
 
-## Speed calibration
+Uploaded and linked videos are limited to 500 MB by default, are processed from temporary storage, and are deleted when the analysis completes or fails. Linked videos are also limited to 120 minutes. Completed reports remain in process memory for six hours and are lost when the backend restarts.
 
-`TRAFFIC_METERS_PER_PIXEL` converts tracked image displacement into physical distance. The default is only suitable for demonstrating the integration. For enforceable speed:
+Link ingestion accepts a single public video from an allowlisted source such as YouTube, Google Drive, Instagram, TikTok, Facebook, X, Vimeo, Twitch, Reddit, Loom, Dropbox, or OneDrive. It does not use cookies or credentials, and it rejects playlists, folders, live streams, private URLs, and private-network destinations. Extend the host allowlist for another trusted yt-dlp source with a comma-separated `TRAFFIC_ALLOWED_VIDEO_LINK_HOSTS` value.
+
+## Perspective and speed calibration
+
+Uploaded videos can mark four normalized image points in this order: far-left,
+far-right, near-right, and near-left. Enter the measured road width and length between
+those points. OpenCV computes a homography from image pixels to ground-plane metres;
+the tracker then measures vehicle bottom-centre trajectories in that plane. A movable
+count line provides more stable unique crossing counts.
+
+If calibration is disabled, `TRAFFIC_METERS_PER_PIXEL` converts tracked image
+displacement into physical distance. This fallback is explicitly reported as low
+confidence and is only suitable for integration testing. For operational speed:
 
 1. Fix the camera position, focal length, resolution, and frame rate.
 2. Measure visible road reference distances.
-3. Use perspective/homography calibration; a single scale is not accurate across image depth.
+3. Recalibrate each camera after its zoom, position, crop, or resolution changes.
 4. Compare results against a calibrated radar/LIDAR device.
 5. Set the legal speed limit and preserve calibration/version audit records.
 
-The current estimator smooths five displacement samples and rejects speeds above 200 km/h. It is operational telemetry, not certified enforcement evidence.
+The estimator uses a trimmed trajectory average, acceleration/outlier rejection, and
+validated track lifecycles. It remains operational telemetry, not certified
+enforcement evidence, until it is independently validated and approved for the local
+legal context.
+
+## Custom and specialist models
+
+`models/yolo11s.pt` is the stronger generic baseline. It is not a substitute for local
+fine-tuning. See `training/README.md` for camera-specific vehicle, plate, and helmet
+dataset conventions and training commands. The optional specialist environment
+variables are:
+
+```env
+TRAFFIC_PLATE_MODEL_PATH=models/trafficops-plate-best.pt
+TRAFFIC_HELMET_MODEL_PATH=models/trafficops-helmet-best.pt
+TRAFFIC_TESSERACT_CMD=tesseract
+```
+
+Number-plate OCR and helmet violations remain unavailable until those validated
+weights are supplied. The result API exposes a capability map, and the frontend shows
+"not configured" instead of generating placeholder results. Wrong-direction events
+use the selected allowed direction and the calibrated ground-plane trajectory.
 
 ## Real-world security and operations
 

@@ -1,14 +1,11 @@
 import type { ReactNode } from "react";
 import { cx } from "../../lib/format";
 
-export function Panel({ title, action, children, className }: { title: string; action?: ReactNode; children: ReactNode; className?: string }) {
+export function Panel({ title, action, children, className, flush = false }: { title: string; action?: ReactNode; children: ReactNode; className?: string; flush?: boolean }) {
   return (
-    <section className={cx("overflow-hidden rounded-lg border border-line bg-card shadow-panel", className)}>
-      <header className="flex min-h-11 items-center justify-between border-b border-line px-4">
-        <div className="flex items-center gap-3">
-          <span className="h-5 w-0.5 rounded-full bg-cyan" aria-hidden="true" />
-          <h2 className="text-xs font-bold uppercase tracking-[0.14em] text-ink">{title}</h2>
-        </div>
+    <section className={cx("overflow-hidden rounded-2xl border border-border bg-card shadow-panel", className)}>
+      <header className={cx("flex min-h-[50px] items-center justify-between gap-3 px-4", !flush && "border-b border-border")}>
+        <h2 className="text-[11px] font-extrabold uppercase tracking-[0.08em] text-ink">{title}</h2>
         {action}
       </header>
       {children}

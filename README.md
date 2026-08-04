@@ -95,6 +95,19 @@ VITE_USE_MOCKS=false
 
 Frontend `http://localhost:5173` मा खोल्नुहोस्।
 
+अब `/` मा public landing page खुल्छ। पहिलो पटक **Get started** बाट account
+बनाउनुहोस्; त्यसपछि application console `/app` मा खुल्छ। Sign-up/sign-in ले
+backend SQLite database मा user र revocable session राख्छ। Password plain text मा
+नराखी scrypt hash को रूपमा store हुन्छ र browser session HttpOnly cookie बाट
+चल्छ।
+
+Local HTTP development मा `TRAFFIC_AUTH_COOKIE_SECURE=false` राख्नुहोस्। HTTPS
+deployment मा `.env` मा यो value अनिवार्य रूपमा परिवर्तन गर्नुहोस्:
+
+```env
+TRAFFIC_AUTH_COOKIE_SECURE=true
+```
+
 ## Docker बाट frontend र backend दुवै चलाउने
 
 Docker र Docker Compose install छ भने

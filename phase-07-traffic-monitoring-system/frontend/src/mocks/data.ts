@@ -27,6 +27,8 @@ export async function getMockVehicles(query: VehicleQuery): Promise<PaginatedVeh
   let items = mockVehicles.filter((vehicle) =>
     (!query.status || vehicle.status === query.status) &&
     (!query.type || vehicle.vehicleType === query.type) &&
+    (!query.speed || (query.speed === "over_limit" ? vehicle.speed > vehicle.speedLimit : vehicle.speed <= vehicle.speedLimit)) &&
+    (!query.date || Date.now() - new Date(vehicle.detectedAt).getTime() <= (query.date === "today" ? 86_400_000 : 604_800_000)) &&
     (!needle || (vehicle.plate ?? "unknown").toLowerCase().includes(needle) || String(vehicle.trackingId).includes(needle))
   );
   items = [...items].sort((a, b) => {

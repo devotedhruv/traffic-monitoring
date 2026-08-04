@@ -12,6 +12,7 @@ from config.settings import CAMERA_ID, DATABASE_PATH, SPEED_LIMIT
 def _connect():
     connection = sqlite3.connect(DATABASE_PATH, timeout=10)
     connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
     try:
         yield connection
         connection.commit()
@@ -45,6 +46,89 @@ def create_database() -> None:
                 connection.execute(f"ALTER TABLE vehicles ADD COLUMN {column} {definition}")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_vehicles_time ON vehicles(time)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_vehicles_status ON vehicles(status)")
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS users(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                email TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS auth_sessions(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token_hash TEXT NOT NULL UNIQUE,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_auth_sessions_token ON auth_sessions(token_hash)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_auth_sessions_expiry ON auth_sessions(expires_at)")
+
+
+def _serialize_user(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": int(row["id"]),
+        "name": row["name"],
+        "email": row["email"],
+        "createdAt": row["created_at"],
+    }
+
+
+def create_user(name: str, email: str, password_hash: str) -> dict[str, Any] | None:
+    """Create a user, returning None when the normalized email already exists."""
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        with _connect() as connection:
+            cursor = connection.execute(
+                "INSERT INTO users(name, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
+                (name, email, password_hash, now),
+            )
+            row = connection.execute("SELECT * FROM users WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    except sqlite3.IntegrityError:
+        return None
+    return _serialize_user(row)
+
+
+def get_user_credentials(email: str) -> dict[str, Any] | None:
+    with _connect() as connection:
+        row = connection.execute(
+            "SELECT id, name, email, password_hash, created_at FROM users WHERE email = ?",
+            (email,),
+        ).fetchone()
+    if row is None:
+        return None
+    return {**_serialize_user(row), "passwordHash": row["password_hash"]}
+
+
+def create_auth_session(user_id: int, token_hash: str, expires_at: str) -> None:
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    with _connect() as connection:
+        connection.execute("DELETE FROM auth_sessions WHERE expires_at <= ?", (now,))
+        connection.execute(
+            "INSERT INTO auth_sessions(user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?)",
+            (user_id, token_hash, expires_at, now),
+        )
+
+
+def get_user_by_session(token_hash: str) -> dict[str, Any] | None:
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    with _connect() as connection:
+        row = connection.execute(
+            """SELECT users.* FROM auth_sessions
+               JOIN users ON users.id = auth_sessions.user_id
+               WHERE auth_sessions.token_hash = ? AND auth_sessions.expires_at > ?""",
+            (token_hash, now),
+        ).fetchone()
+    return _serialize_user(row) if row else None
+
+
+def delete_auth_session(token_hash: str) -> None:
+    with _connect() as connection:
+        connection.execute("DELETE FROM auth_sessions WHERE token_hash = ?", (token_hash,))
 
 
 def save_vehicle(
@@ -99,6 +183,8 @@ def list_vehicles(
     vehicle_type: str = "",
     search: str = "",
     sort: str = "time_desc",
+    speed_filter: str = "",
+    date_filter: str = "",
 ) -> dict[str, Any]:
     clauses: list[str] = []
     values: list[Any] = []
@@ -112,6 +198,17 @@ def list_vehicles(
         clauses.append("(LOWER(COALESCE(plate, '')) LIKE ? OR CAST(COALESCE(tracking_id, id) AS TEXT) LIKE ?)")
         needle = f"%{search.lower()}%"
         values.extend([needle, needle])
+    if speed_filter == "over_limit":
+        clauses.append("speed > ?")
+        values.append(SPEED_LIMIT)
+    elif speed_filter == "under_limit":
+        clauses.append("speed <= ?")
+        values.append(SPEED_LIMIT)
+    if date_filter:
+        now = datetime.now(timezone.utc)
+        start = now - (timedelta(days=7) if date_filter == "week" else timedelta(days=1))
+        clauses.append("time >= ?")
+        values.append(start.strftime("%Y-%m-%d %H:%M:%S"))
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     orders = {
         "time_desc": "time DESC, id DESC", "time_asc": "time ASC, id ASC",

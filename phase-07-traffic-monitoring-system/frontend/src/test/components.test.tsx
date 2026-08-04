@@ -1,9 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ActiveVehicleCard } from "../features/dashboard/ActiveVehicleCard";
 import { SpeedGauge } from "../features/dashboard/SpeedGauge";
 import { DetectionTable } from "../features/vehicles/DetectionTable";
 import { StatusBadge } from "../components/ui/StatusBadge";
+import { UploadAnalysisPage } from "../pages/UploadAnalysisPage";
 import type { VehicleDetection, VehicleQuery } from "../types";
 
 const vehicle: VehicleDetection = {
@@ -12,6 +14,8 @@ const vehicle: VehicleDetection = {
   detectedAt: "2026-07-23T10:00:00.000Z", cameraId: "camera-01"
 };
 const query: VehicleQuery = { page: 1, pageSize: 10, status: "", type: "", search: "", sort: "time_desc" };
+
+afterEach(cleanup);
 
 describe("operational UI", () => {
   it("marks gauge state below and above the limit", () => {
@@ -46,5 +50,22 @@ describe("operational UI", () => {
     rerender(<ActiveVehicleCard vehicle={vehicle} />);
     expect(container).toHaveTextContent("#42");
     expect(container).toHaveTextContent("BA 12 PA 1234");
+  });
+
+  it("renders the manual video analysis workflow", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><UploadAnalysisPage /></QueryClientProvider>);
+    expect(screen.getByRole("heading", { name: /turn any road video/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /drop your video here/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /analyze traffic video/i })).toBeDisabled();
+  });
+
+  it("switches the manual analysis workflow to a public video link", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><UploadAnalysisPage /></QueryClientProvider>);
+    fireEvent.click(screen.getByRole("button", { name: /video link/i }));
+    expect(screen.getByRole("textbox", { name: /public video url/i })).toBeInTheDocument();
+    expect(screen.getByText("YouTube")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /analyze video link/i })).toBeDisabled();
   });
 });

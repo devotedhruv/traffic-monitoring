@@ -8,7 +8,7 @@ export function StatusBadge({ status, verbose = false }: { status: VehicleStatus
   return (
     <span className={cx(
       "inline-flex items-center gap-1.5 rounded border px-2 py-1 text-[11px] font-bold tracking-wide",
-      over ? "border-danger/30 bg-danger-dark text-danger" : "border-success/25 bg-cyan-dark text-success"
+      over ? "border-danger/25 bg-danger/10 text-danger" : "border-success/20 bg-success/10 text-success"
     )}>
       <Icon size={13} aria-hidden="true" />
       {verbose ? (over ? "OVERSPEED VIOLATION" : "WITHIN SPEED LIMIT") : status}
