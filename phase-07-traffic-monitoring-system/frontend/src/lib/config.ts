@@ -15,6 +15,10 @@ export const config = {
 };
 
 export const endpoints = {
+  signUp: "/api/auth/signup",
+  signIn: "/api/auth/signin",
+  signOut: "/api/auth/signout",
+  me: "/api/auth/me",
   health: "/api/health",
   summary: "/api/dashboard/summary",
   vehicles: "/api/vehicles",

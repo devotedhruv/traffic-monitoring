@@ -1,13 +1,32 @@
 import { config, endpoints } from "../lib/config";
 import { getMockAnalytics, getMockSummary, getMockVehicles, mockVehicles } from "../mocks/data";
-import type { AnalyticsData, AnalyticsRange, Camera, DashboardSummary, PaginatedVehicles, VehicleDetection, VehicleQuery, VideoAnalysisJob, VideoAnalysisOptions, VideoLinkAnalysisOptions } from "../types";
+import type { AnalyticsData, AnalyticsRange, AuthResponse, Camera, DashboardSummary, PaginatedVehicles, VehicleDetection, VehicleQuery, VideoAnalysisJob, VideoAnalysisOptions, VideoLinkAnalysisOptions } from "../types";
+
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${config.apiBaseUrl}${path}`, {
     ...init,
+    credentials: "include",
     headers: { Accept: "application/json", ...init?.headers }
   });
-  if (!response.ok) throw new Error(`Request failed (${response.status})`);
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { detail?: string | { msg?: string }[] } | null;
+    const detail = Array.isArray(payload?.detail)
+      ? payload.detail.map((item) => item.msg).filter(Boolean).join(", ")
+      : payload?.detail;
+    if (response.status === 401) window.dispatchEvent(new Event("trafficops:unauthorized"));
+    throw new ApiError(detail || `Request failed (${response.status})`, response.status);
+  }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -35,6 +54,7 @@ async function startVideoAnalysis(file: File, options: VideoAnalysisOptions) {
   if (options.calibration) params.set("calibration", JSON.stringify(options.calibration));
   const response = await fetch(`${config.apiBaseUrl}${endpoints.videoAnalysis}?${params}`, {
     method: "POST",
+    credentials: "include",
     headers: {
       Accept: "application/json",
       "Content-Type": file.type || "application/octet-stream"
@@ -42,6 +62,7 @@ async function startVideoAnalysis(file: File, options: VideoAnalysisOptions) {
     body: file
   });
   if (!response.ok) {
+    if (response.status === 401) window.dispatchEvent(new Event("trafficops:unauthorized"));
     const payload = await response.json().catch(() => null) as { detail?: string } | null;
     throw new Error(payload?.detail || `Video upload failed (${response.status})`);
   }
@@ -51,6 +72,7 @@ async function startVideoAnalysis(file: File, options: VideoAnalysisOptions) {
 async function startLinkVideoAnalysis(options: VideoLinkAnalysisOptions) {
   const response = await fetch(`${config.apiBaseUrl}${endpoints.videoAnalysisLink}`, {
     method: "POST",
+    credentials: "include",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json"
@@ -58,6 +80,7 @@ async function startLinkVideoAnalysis(options: VideoLinkAnalysisOptions) {
     body: JSON.stringify(options)
   });
   if (!response.ok) {
+    if (response.status === 401) window.dispatchEvent(new Event("trafficops:unauthorized"));
     const payload = await response.json().catch(() => null) as { detail?: string | { msg?: string }[] } | null;
     const detail = Array.isArray(payload?.detail)
       ? payload.detail.map((item) => item.msg).filter(Boolean).join(", ")
@@ -68,6 +91,18 @@ async function startLinkVideoAnalysis(options: VideoLinkAnalysisOptions) {
 }
 
 export const api = {
+  signUp: (name: string, email: string, password: string) => request<AuthResponse>(endpoints.signUp, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, email, password })
+  }),
+  signIn: (email: string, password: string) => request<AuthResponse>(endpoints.signIn, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password })
+  }),
+  signOut: () => request<void>(endpoints.signOut, { method: "POST" }),
+  getMe: () => request<AuthResponse>(endpoints.me),
   getSummary: () => config.useMocks ? getMockSummary() : request<DashboardSummary>(endpoints.summary),
   getVehicles: (query: VehicleQuery) => config.useMocks ? getMockVehicles(query) : request<PaginatedVehicles>(`${endpoints.vehicles}?${queryString(query)}`),
   getVehicle: (id: number) => config.useMocks

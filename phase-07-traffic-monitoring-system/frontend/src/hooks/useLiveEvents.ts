@@ -67,8 +67,13 @@ export function useLiveEvents() {
         }
       };
       socket.onerror = () => socket?.close();
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         if (stopped) return;
+        if (event.code === 4401) {
+          window.dispatchEvent(new Event("trafficops:unauthorized"));
+          setConnection("offline");
+          return;
+        }
         attempts += 1;
         setConnection(attempts > 5 ? "offline" : "reconnecting");
         timer = setTimeout(connect, Math.min(1000 * 2 ** attempts, 30_000));

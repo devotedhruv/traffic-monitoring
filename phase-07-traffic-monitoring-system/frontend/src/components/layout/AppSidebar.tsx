@@ -2,24 +2,25 @@ import {
   Activity, AlertTriangle, BarChart3, Bell, CarFront, ChevronLeft, ChevronRight,
   FileText, RadioTower, Settings, ShieldCheck, Video
 } from "lucide-react";
+import { useAuth } from "../../app/AuthContext";
 import { usePathname } from "../../app/router";
 import { cx } from "../../lib/format";
 import { Link } from "../ui/Link";
 
 const navigation = [
-  { to: "/", label: "Live Operations", icon: RadioTower },
-  { to: "/history", label: "Vehicles", icon: CarFront },
-  { to: "/history?status=OVERSPEED", label: "Violations", icon: AlertTriangle },
-  { to: "/history?status=OVERSPEED&view=alerts", label: "Alerts", icon: Bell },
-  { to: "/analytics", label: "Analytics", icon: BarChart3 },
-  { to: "/analytics?view=reports", label: "Reports", icon: FileText },
-  { to: "/analyze", label: "Analyze Video", icon: Video },
-  { to: "/?panel=settings", label: "Settings", icon: Settings }
+  { to: "/app", label: "Live Operations", icon: RadioTower },
+  { to: "/app/history", label: "Vehicles", icon: CarFront },
+  { to: "/app/history?status=OVERSPEED", label: "Violations", icon: AlertTriangle },
+  { to: "/app/history?status=OVERSPEED&view=alerts", label: "Alerts", icon: Bell },
+  { to: "/app/analytics", label: "Analytics", icon: BarChart3 },
+  { to: "/app/analytics?view=reports", label: "Reports", icon: FileText },
+  { to: "/app/analyze", label: "Analyze Video", icon: Video },
+  { to: "/app?panel=settings", label: "Settings", icon: Settings }
 ] as const;
 
 function Brand({ collapsed = false }: { collapsed?: boolean }) {
   return (
-    <Link to="/" className={cx("flex items-center gap-3", collapsed && "justify-center")} aria-label="TrafficOps AI dashboard">
+    <Link to="/app" className={cx("flex items-center gap-3", collapsed && "justify-center")} aria-label="TrafficOps AI dashboard">
       <span className="brand-mark"><Activity size={25} strokeWidth={2.2} /></span>
       {!collapsed && <span className="min-w-0"><strong className="block whitespace-nowrap text-[17px] tracking-[-0.02em]">TrafficOps <span className="text-primary">AI</span></strong><span className="block whitespace-nowrap text-[10px] text-muted">Road intelligence, made visible</span></span>}
     </Link>
@@ -37,11 +38,13 @@ function SystemStatus({ collapsed = false }: { collapsed?: boolean }) {
 }
 
 function Operator({ collapsed = false }: { collapsed?: boolean }) {
+  const { user } = useAuth();
+  const initials = user?.name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "OP";
   return (
-    <button type="button" className={cx("operator-card", collapsed && "justify-center px-2")} title="Signed in as Traffic Admin">
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary-soft text-primary"><span className="text-xs font-bold">TA</span></span>
-      {!collapsed && <><span className="min-w-0 flex-1 text-left"><span className="block text-[10px] text-muted">Operator</span><strong className="block truncate text-xs">Traffic Admin</strong></span><ChevronRight size={15} className="text-muted" /></>}
-    </button>
+    <div className={cx("operator-card", collapsed && "justify-center px-2")} title={`Signed in as ${user?.name || "Operator"}`}>
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary-soft text-primary"><span className="text-xs font-bold">{initials}</span></span>
+      {!collapsed && <span className="min-w-0 flex-1 text-left"><span className="block text-[10px] text-muted">Operator</span><strong className="block truncate text-xs">{user?.name || "Operator"}</strong><span className="block truncate text-[8px] text-muted">{user?.email}</span></span>}
+    </div>
   );
 }
 
@@ -53,7 +56,7 @@ export function AppSidebar({ collapsed, mobileOpen, onCollapse, onClose }: { col
       <nav className="scrollbar-thin flex-1 space-y-1 overflow-y-auto px-3 py-2" aria-label="Product navigation">
         {navigation.map(({ to, label, icon: Icon }) => {
           const path = to.split("?")[0];
-          const active = path === "/" ? pathname === "/" && label === "Live Operations" : pathname === path && (path === "/history" ? label === "Vehicles" : path === "/analytics" ? label === "Analytics" : true);
+          const active = path === "/app" ? pathname === "/app" && label === "Live Operations" : pathname === path && (path === "/app/history" ? label === "Vehicles" : path === "/app/analytics" ? label === "Analytics" : true);
           return <Link key={label} to={to} onClick={onClose} aria-current={active ? "page" : undefined} title={collapsed ? label : undefined} className={cx("sidebar-link", active && "sidebar-link-active", collapsed && "justify-center px-0")}><Icon size={18} strokeWidth={1.9} /><span className={cx(collapsed && "sr-only")}>{label}</span></Link>;
         })}
       </nav>

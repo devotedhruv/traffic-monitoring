@@ -4,6 +4,17 @@ export type VehicleType = "car" | "motorcycle" | "bus" | "truck" | "unknown";
 export type AnalyticsRange = "hour" | "today" | "week";
 export type VideoAnalysisStatus = "queued" | "processing" | "completed" | "failed";
 
+export interface AuthUser {
+  id: number;
+  name: string;
+  email: string;
+  createdAt: string;
+}
+
+export interface AuthResponse {
+  user: AuthUser;
+}
+
 export interface NormalizedPoint {
   x: number;
   y: number;
