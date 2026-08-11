@@ -112,6 +112,39 @@ class TrafficApiTests(unittest.TestCase):
             ), Response())
         self.assertEqual(invalid.exception.status_code, 401)
 
+    def test_user_can_sign_in_again_with_signup_credentials(self):
+        password = "strong-pass-123"
+        signup_response = Response()
+        signup = auth.signup(auth.SignUpRequest(
+            name="Traffic Operator", email=" Operator@Example.com ", password=password
+        ), signup_response)
+
+        cookie = SimpleCookie()
+        cookie.load(signup_response.headers["set-cookie"])
+        token = cookie[AUTH_COOKIE_NAME].value
+        auth.signout(Request({
+            "type": "http",
+            "headers": [(b"cookie", f"{AUTH_COOKIE_NAME}={token}".encode("ascii"))],
+        }), Response())
+
+        signin_response = Response()
+        signin = auth.signin(auth.SignInRequest(
+            email=" OPERATOR@example.com ", password=password
+        ), signin_response)
+
+        self.assertEqual(signin["user"]["id"], signup["user"]["id"])
+        self.assertEqual(signin["user"]["email"], "operator@example.com")
+        self.assertIn("httponly", signin_response.headers["set-cookie"].lower())
+
+    def test_signup_rejects_common_gmail_domain_typo(self):
+        with self.assertRaises(ValueError) as invalid:
+            auth.SignUpRequest(
+                name="Traffic Operator",
+                email="operator@gmaiil.com",
+                password="strong-pass-123",
+            )
+        self.assertIn("operator@gmail.com", str(invalid.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

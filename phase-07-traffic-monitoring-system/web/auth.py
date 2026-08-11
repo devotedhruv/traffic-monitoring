@@ -22,9 +22,25 @@ from src.database import (
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+COMMON_EMAIL_DOMAIN_TYPOS = {
+    "gmaiil.com": "gmail.com",
+    "gmial.com": "gmail.com",
+    "gmal.com": "gmail.com",
+    "gmail.co": "gmail.com",
+    "gmail.con": "gmail.com",
+}
 SCRYPT_N = 2**14
 SCRYPT_R = 8
 SCRYPT_P = 1
+
+
+def email_domain_suggestion(email: str) -> str | None:
+    """Return a corrected address for a small set of unambiguous domain typos."""
+    local_part, separator, domain = email.rpartition("@")
+    corrected_domain = COMMON_EMAIL_DOMAIN_TYPOS.get(domain)
+    if not separator or not local_part or corrected_domain is None:
+        return None
+    return f"{local_part}@{corrected_domain}"
 
 
 class SignUpRequest(BaseModel):
@@ -46,6 +62,9 @@ class SignUpRequest(BaseModel):
         cleaned = value.strip().lower()
         if not EMAIL_PATTERN.fullmatch(cleaned):
             raise ValueError("Enter a valid email address")
+        suggestion = email_domain_suggestion(cleaned)
+        if suggestion:
+            raise ValueError(f"Check the email domain. Did you mean {suggestion}?")
         return cleaned
 
 

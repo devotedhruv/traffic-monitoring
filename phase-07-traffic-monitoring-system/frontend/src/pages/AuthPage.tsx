@@ -11,6 +11,22 @@ function safeDestination() {
   return destination?.startsWith("/app") && !destination.startsWith("//") ? destination : "/app";
 }
 
+const commonEmailDomainTypos: Record<string, string> = {
+  "gmaiil.com": "gmail.com",
+  "gmial.com": "gmail.com",
+  "gmal.com": "gmail.com",
+  "gmail.co": "gmail.com",
+  "gmail.con": "gmail.com"
+};
+
+function emailSuggestion(email: string) {
+  const separator = email.lastIndexOf("@");
+  if (separator <= 0) return null;
+  const localPart = email.slice(0, separator);
+  const correctedDomain = commonEmailDomainTypos[email.slice(separator + 1).toLowerCase()];
+  return correctedDomain ? `${localPart}@${correctedDomain}` : null;
+}
+
 export function AuthPage({ mode }: { mode: "signin" | "signup" }) {
   const isSignup = mode === "signup";
   const { status, user, signIn, signUp } = useAuth();
@@ -28,6 +44,8 @@ export function AuthPage({ mode }: { mode: "signin" | "signup" }) {
     const normalizedEmail = email.trim();
     if (isSignup && name.trim().length < 2) return setError("Please enter your full name.");
     if (!normalizedEmail || !normalizedEmail.includes("@")) return setError("Please enter a valid email address.");
+    const suggestedEmail = isSignup ? emailSuggestion(normalizedEmail) : null;
+    if (suggestedEmail) return setError(`Check your email address. Did you mean ${suggestedEmail}?`);
     if (password.length < 8) return setError("Password must be at least 8 characters.");
     if (isSignup && password !== confirmPassword) return setError("Passwords do not match.");
     setSubmitting(true);
