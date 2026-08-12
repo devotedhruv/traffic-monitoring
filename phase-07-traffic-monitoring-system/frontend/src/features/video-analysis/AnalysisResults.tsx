@@ -179,7 +179,7 @@ export function AnalysisResults({ result }: { result: VideoAnalysisResult }) {
                       <td className="px-4 py-3 tabular-nums text-muted">{vehicle.trackedForSeconds.toFixed(1)}s</td>
                       <td className="px-4 py-3 text-muted">{vehicle.direction}</td>
                       <td className="px-4 py-3 tabular-nums">{Math.round(vehicle.confidence * 100)}%</td>
-                      <td className="px-4 py-3 font-semibold tabular-nums">{vehicle.estimatedSpeed === null ? "—" : `${formatSpeed(vehicle.estimatedSpeed)} km/h`}<small className="mt-1 block text-[9px] text-muted">{vehicle.speedConfidence} confidence</small></td>
+                      <td className="px-4 py-3 font-semibold tabular-nums">{vehicle.estimatedSpeed === null ? "—" : `${formatSpeed(vehicle.estimatedSpeed)} km/h`}<small className="mt-1 block text-[9px] text-muted">{vehicle.speedConfidence} · {vehicle.speedSamples} samples</small></td>
                       <td className="px-4 py-3 tabular-nums text-muted">{vehicle.peakSpeed === null ? "—" : `${formatSpeed(vehicle.peakSpeed)} km/h`}</td>
                       <td className="px-4 py-3"><ResultBadge status={vehicle.status} /></td>
                     </tr>
@@ -192,7 +192,7 @@ export function AnalysisResults({ result }: { result: VideoAnalysisResult }) {
                 <article key={vehicle.trackingId} className="space-y-3 p-4">
                   <div className="flex items-start justify-between gap-3"><div><p className="font-extrabold text-cyan">Track #{vehicle.trackingId}</p><p className="text-sm text-muted">{titleCase(vehicle.vehicleType)} · {titleCase(vehicle.color)}</p></div><ResultBadge status={vehicle.status} /></div>
                   <dl className="grid grid-cols-2 gap-3 text-xs">
-                    <div><dt className="text-muted">Est. speed</dt><dd className="mt-1 font-bold">{vehicle.estimatedSpeed === null ? "—" : `${formatSpeed(vehicle.estimatedSpeed)} km/h`}</dd></div>
+                    <div><dt className="text-muted">Est. speed</dt><dd className="mt-1 font-bold">{vehicle.estimatedSpeed === null ? "—" : `${formatSpeed(vehicle.estimatedSpeed)} km/h`}<small className="mt-1 block font-normal text-muted">{vehicle.speedSamples} samples</small></dd></div>
                     <div><dt className="text-muted">First seen</dt><dd className="mt-1 font-bold">{formatDuration(vehicle.firstSeenSeconds)}</dd></div>
                     <div><dt className="text-muted">Direction</dt><dd className="mt-1 font-bold">{vehicle.direction}</dd></div>
                     <div><dt className="text-muted">Confidence</dt><dd className="mt-1 font-bold">{Math.round(vehicle.confidence * 100)}%</dd></div>

@@ -112,7 +112,7 @@ const capabilities = [
   { icon: CircleGauge, title: "Speed monitoring", text: "Turn calibrated camera footage into clear speed insights and threshold-based violations." },
   { icon: BellRing, title: "Actionable alerts", text: "Surface overspeed events with timestamps, vehicle details, and searchable history." },
   { icon: BarChart3, title: "Operational analytics", text: "Understand traffic volume, fleet mix, average speed, and peak periods at a glance." },
-  { icon: Upload, title: "Video analysis", text: "Upload road footage or queue a supported public video link for on-demand processing." },
+  { icon: Upload, title: "Video analysis", text: "Upload a road-video clip, calibrate its visible road plane, and process it on demand." },
   { icon: Database, title: "Local data control", text: "Keep detections and operational records in your own deployment and database." }
 ];
 

@@ -8,13 +8,10 @@ import {
 } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  AlertTriangle,
   BarChart3,
   CheckCircle2,
   ChevronDown,
-  Cloud,
   FileVideo2,
-  Link2,
   LoaderCircle,
   LockKeyhole,
   MapPin,
@@ -23,8 +20,7 @@ import {
   RotateCcw,
   ShieldCheck,
   Sparkles,
-  UploadCloud,
-  Youtube
+  UploadCloud
 } from "lucide-react";
 import { Panel } from "../components/ui/Panel";
 import { AnalysisResults } from "../features/video-analysis/AnalysisResults";
@@ -36,14 +32,20 @@ import type { RoadCalibration, VideoAnalysisOptions } from "../types";
 
 const ACCEPTED_EXTENSIONS = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".mpeg", ".mpg", ".m4v"];
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
-type SourceMode = "upload" | "link";
+const BUNDLED_VIDEO_BYTES = 10_352_631;
+const BUNDLED_ROAD_POINTS = [
+  { x: 0.27, y: 0.5 },
+  { x: 0.69, y: 0.5 },
+  { x: 0.88, y: 0.98 },
+  { x: 0.06, y: 0.98 }
+];
 
 const DEFAULT_CALIBRATION: RoadCalibration = {
   enabled: true,
   sourcePoints: [],
-  roadWidthMeters: 8,
-  roadLengthMeters: 30,
-  laneCount: 2,
+  roadWidthMeters: 0,
+  roadLengthMeters: 0,
+  laneCount: 0,
   countingLinePosition: 0.62,
   stabilize: true,
   analysisFps: 15,
@@ -59,21 +61,9 @@ function validateVideo(file: File) {
   return "";
 }
 
-function validateLink(value: string) {
-  try {
-    const url = new URL(value.trim());
-    return url.protocol === "https:" || url.protocol === "http:" ? "" : "The video link must start with https:// or http://.";
-  } catch {
-    return "Enter a valid public video link.";
-  }
-}
-
 export function UploadAnalysisPage() {
   const input = useRef<HTMLInputElement>(null);
-  const [sourceMode, setSourceMode] = useState<SourceMode>("upload");
   const [file, setFile] = useState<File | null>(null);
-  const [videoUrl, setVideoUrl] = useState("");
-  const [confirmedRights, setConfirmedRights] = useState(false);
   const [previewUrl, setPreviewUrl] = useState("");
   const [dragging, setDragging] = useState(false);
   const [validationError, setValidationError] = useState("");
@@ -90,17 +80,8 @@ export function UploadAnalysisPage() {
   }, [previewUrl]);
 
   const startAnalysis = useMutation({
-    mutationFn: (
-      request:
-        | { source: "upload"; selected: File; settings: VideoAnalysisOptions }
-        | { source: "link"; url: string; settings: VideoAnalysisOptions; confirmedRights: boolean }
-    ) => request.source === "upload"
-      ? api.startVideoAnalysis(request.selected, request.settings)
-      : api.startLinkVideoAnalysis({
-          videoUrl: request.url,
-          confirmedRights: request.confirmedRights,
-          ...request.settings
-        }),
+    mutationFn: (request: { selected: File; settings: VideoAnalysisOptions }) =>
+      api.startVideoAnalysis(request.selected, request.settings),
     onSuccess: (job) => setJobId(job.id)
   });
   const jobQuery = useQuery({
@@ -124,9 +105,17 @@ export function UploadAnalysisPage() {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setFile(next);
     setPreviewUrl(URL.createObjectURL(next));
+    const bundledProfile = next.name.toLowerCase() === "traffic.mp4" && next.size === BUNDLED_VIDEO_BYTES;
     setOptions((current) => ({
       ...current,
-      calibration: { ...(current.calibration ?? DEFAULT_CALIBRATION), enabled: true, sourcePoints: [] }
+      calibration: {
+        ...(current.calibration ?? DEFAULT_CALIBRATION),
+        enabled: true,
+        sourcePoints: bundledProfile ? BUNDLED_ROAD_POINTS : [],
+        roadWidthMeters: bundledProfile ? 13 : 0,
+        roadLengthMeters: bundledProfile ? 50 : 0,
+        laneCount: bundledProfile ? 2 : 0
+      }
     }));
     setJobId(null);
     startAnalysis.reset();
@@ -149,49 +138,29 @@ export function UploadAnalysisPage() {
     setValidationError("");
     startAnalysis.reset();
   };
-  const changeSource = (mode: SourceMode) => {
-    if (active || mode === sourceMode) return;
-    setSourceMode(mode);
-    setOptions((current) => ({
-      ...current,
-      calibration: {
-        ...(current.calibration ?? DEFAULT_CALIBRATION),
-        enabled: mode === "upload"
-      }
-    }));
-    setJobId(null);
-    setValidationError("");
-    startAnalysis.reset();
-  };
-
-  const sourceReady = sourceMode === "upload" ? Boolean(file) : Boolean(videoUrl.trim() && confirmedRights);
-  const calibrationReady = !calibration.enabled || calibration.sourcePoints.length === 4;
-  const settingsReady = options.speedLimit >= 5 && options.metersPerPixel > 0 && calibrationReady;
+  const sourceReady = Boolean(file);
+  const dimensionsReady = calibration.roadWidthMeters >= 2 && calibration.roadWidthMeters <= 80
+    && calibration.roadLengthMeters >= 5 && calibration.roadLengthMeters <= 1000
+    && Number.isInteger(calibration.laneCount) && calibration.laneCount >= 1 && calibration.laneCount <= 8;
+  const calibrationReady = calibration.enabled && calibration.sourcePoints.length === 4 && dimensionsReady;
+  const settingsReady = options.speedLimit >= 5 && options.speedLimit <= 200 && calibrationReady;
   const disabledReason = !sourceReady
-    ? sourceMode === "upload"
-      ? "Choose a road video to enable analysis."
-      : "Enter a public link and confirm permission to continue."
+    ? "Choose a road video to enable analysis."
     : options.speedLimit < 5
       ? "Enter a speed limit of at least 5 km/h."
-      : calibration.enabled && calibration.sourcePoints.length !== 4
+      : options.speedLimit > 200
+        ? "Speed limit cannot exceed 200 km/h."
+        : calibration.sourcePoints.length !== 4
         ? "Mark all four road-plane points on the video preview."
-        : options.metersPerPixel <= 0
-          ? "Enter a valid fallback road scale."
+        : !dimensionsReady
+          ? "Enter measured road dimensions and a lane count within the supported ranges."
           : "";
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (active || !settingsReady) return;
     setJobId(null);
-    if (sourceMode === "upload") {
-      if (file) startAnalysis.mutate({ source: "upload", selected: file, settings: options });
-      return;
-    }
-    const error = validateLink(videoUrl);
-    setValidationError(error);
-    if (!error && confirmedRights) {
-      startAnalysis.mutate({ source: "link", url: videoUrl.trim(), settings: options, confirmedRights });
-    }
+    if (file) startAnalysis.mutate({ selected: file, settings: options });
   };
 
   const failure = startAnalysis.error?.message || jobQuery.error?.message || job?.error;
@@ -213,7 +182,7 @@ export function UploadAnalysisPage() {
             <div className="relative z-10 max-w-[670px]">
               <span className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary-soft px-3 py-1.5 text-[10px] font-bold uppercase tracking-[.08em] text-primary"><Sparkles size={13} />Step {currentStep} of 3</span>
               <h1 className="mt-4 max-w-[620px] text-[28px] font-extrabold leading-tight tracking-[-.04em] sm:text-[34px]">Turn any road video into traffic insights.</h1>
-              <p className="mt-3 max-w-[620px] text-sm leading-6 text-muted">Upload footage or provide a public video link. Calibrated ground-plane tracking reports vehicle type, trajectory, measured speed, line crossings, and possible violations.</p>
+              <p className="mt-3 max-w-[620px] text-sm leading-6 text-muted">Upload a road-video clip and calibrate its visible road plane. Ground-plane tracking reports vehicle type, trajectory, measured speed, line crossings, and possible violations.</p>
               <div className="mt-6 flex flex-wrap gap-2">
                 <span className="trust-chip"><ShieldCheck />Temporary processing<small>Deleted after analysis</small></span>
                 <span className="trust-chip"><LockKeyhole />Secure & private<small>Encrypted transport</small></span>
@@ -230,12 +199,7 @@ export function UploadAnalysisPage() {
 
           <Panel title="Upload Road Footage">
             <div className="p-3 sm:p-4">
-              <div className="mb-3 grid grid-cols-2 rounded-xl border border-border bg-surface-secondary p-1" aria-label="Choose video source">
-                <button type="button" onClick={() => changeSource("upload")} aria-pressed={sourceMode === "upload"} disabled={active} className={cx("source-tab", sourceMode === "upload" && "source-tab-active")}><UploadCloud size={15} />Upload file</button>
-                <button type="button" onClick={() => changeSource("link")} aria-pressed={sourceMode === "link"} disabled={active} className={cx("source-tab", sourceMode === "link" && "source-tab-active")}><Link2 size={15} />Video link</button>
-              </div>
-
-              {sourceMode === "upload" && (!file ? (
+              {!file ? (
                 <div
                   onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
                   onDragOver={(event) => event.preventDefault()}
@@ -275,17 +239,6 @@ export function UploadAnalysisPage() {
                     {!active && <button type="button" onClick={() => input.current?.click()} className="secondary-button">Replace file</button>}
                   </div>
                 </div>
-              ))}
-
-              {sourceMode === "link" && (
-                <div className="flex min-h-[275px] flex-col justify-center rounded-2xl border border-primary/30 bg-primary/[.025] p-5 sm:p-7">
-                  <span className="grid h-12 w-12 place-items-center rounded-xl bg-primary text-white"><Link2 size={21} /></span>
-                  <h2 className="mt-4 text-base font-bold">Paste a public video link</h2>
-                  <p className="mt-1 text-xs leading-5 text-muted">The video is temporarily downloaded, analyzed, then removed. Link analysis uses fallback calibration because its frame cannot be marked before download.</p>
-                  <label className="relative mt-4"><Link2 className="absolute left-3 top-3.5 text-primary" size={16} /><input type="url" value={videoUrl} onChange={(event) => { setVideoUrl(event.target.value); setValidationError(""); }} disabled={active} placeholder="https://youtube.com/watch?v=…" className="field pl-10" aria-label="Public video URL" /></label>
-                  <div className="mt-3 flex flex-wrap gap-2"><span className="source-chip"><Youtube size={13} />YouTube</span><span className="source-chip"><Cloud size={13} />Google Drive</span>{["Instagram", "TikTok", "Facebook", "Vimeo"].map((source) => <span key={source} className="source-chip">{source}</span>)}</div>
-                  <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-surface p-3 text-[11px] leading-5 text-muted"><input type="checkbox" checked={confirmedRights} onChange={(event) => setConfirmedRights(event.target.checked)} disabled={active} className="mt-0.5 h-4 w-4 accent-primary" /><span>I own this video or have permission to download and analyze it.</span></label>
-                </div>
               )}
 
               <input ref={input} type="file" accept="video/*,.mkv,.avi" onChange={handleInput} className="sr-only" aria-label="Choose a road video" />
@@ -316,15 +269,14 @@ export function UploadAnalysisPage() {
                 <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between px-3 text-[11px] font-semibold text-secondary">Perspective & road calibration<ChevronDown size={15} className="transition group-open:rotate-180" /></summary>
                 <div className="space-y-3 border-t border-border p-3">
                   <label className="flex items-start justify-between gap-3 text-[11px] text-secondary">
-                    <span><strong className="block">Four-point calibration</strong><small className="text-muted">Recommended for usable speed estimates</small></span>
-                    <input type="checkbox" checked={calibration.enabled} onChange={(event) => updateCalibration({ enabled: event.target.checked })} disabled={active || sourceMode === "link"} className="mt-1 h-4 w-4 accent-primary" />
+                    <span><strong className="block">Four-point calibration required</strong><small className="text-muted">Prevents uncalibrated speed from being reported as reliable data</small></span>
+                    <CheckCircle2 size={16} className="mt-1 shrink-0 text-primary" />
                   </label>
 
-                  {calibration.enabled ? (
-                    <>
+                  <>
                       <div className="grid grid-cols-2 gap-2">
-                        <label className="text-[10px] text-muted">Measured width (m)<input type="number" min={2} max={80} step={0.5} value={calibration.roadWidthMeters} onChange={(event) => updateCalibration({ roadWidthMeters: Number(event.target.value) })} disabled={active} className="field mt-1.5 tabular-nums" /></label>
-                        <label className="text-[10px] text-muted">Measured length (m)<input type="number" min={5} max={1000} step={1} value={calibration.roadLengthMeters} onChange={(event) => updateCalibration({ roadLengthMeters: Number(event.target.value) })} disabled={active} className="field mt-1.5 tabular-nums" /></label>
+                        <label className="text-[10px] text-muted">Actual measured width (m)<input type="number" min={2} max={80} step={0.5} value={calibration.roadWidthMeters} onChange={(event) => updateCalibration({ roadWidthMeters: Number(event.target.value) })} disabled={active} className="field mt-1.5 tabular-nums" /></label>
+                        <label className="text-[10px] text-muted">Actual measured length (m)<input type="number" min={5} max={1000} step={1} value={calibration.roadLengthMeters} onChange={(event) => updateCalibration({ roadLengthMeters: Number(event.target.value) })} disabled={active} className="field mt-1.5 tabular-nums" /></label>
                       </div>
                       <label className="block text-[10px] text-muted">Calibrated lanes<input type="number" min={1} max={8} step={1} value={calibration.laneCount} onChange={(event) => updateCalibration({ laneCount: Number(event.target.value) })} disabled={active} className="field mt-1.5 tabular-nums" /></label>
                       <label className="block text-[10px] text-muted">Counting-line position · {Math.round(calibration.countingLinePosition * 100)}%<input type="range" min={0.05} max={0.95} step={0.01} value={calibration.countingLinePosition} onChange={(event) => updateCalibration({ countingLinePosition: Number(event.target.value) })} disabled={active} className="mt-2 w-full accent-primary" /></label>
@@ -332,18 +284,12 @@ export function UploadAnalysisPage() {
                       <label className="flex items-center gap-2 text-[10px] font-semibold text-secondary"><input type="checkbox" checked={calibration.stabilize} onChange={(event) => updateCalibration({ stabilize: event.target.checked })} disabled={active} className="h-4 w-4 accent-primary" />Stabilize camera motion before detection</label>
                       <p className="rounded-lg bg-success/10 p-2 text-[9px] leading-4 text-success">BoT-SORT lifecycle tracking · {calibration.analysisFps} analyzed FPS · calibrated count line</p>
                     </>
-                  ) : (
-                    <div className="space-y-2 rounded-lg border border-warning/25 bg-warning/10 p-2.5">
-                      <p className="flex gap-2 text-[10px] leading-4 text-warning"><AlertTriangle size={14} className="shrink-0" />Fallback pixel-scale mode is less reliable, especially on perspective roads.</p>
-                      <label className="text-[10px] text-muted">Metres per pixel<input type="number" min={0.0001} max={10} step={0.001} value={options.metersPerPixel} onChange={(event) => setOptions((current) => ({ ...current, metersPerPixel: Number(event.target.value) }))} disabled={active} className="field mt-1.5 tabular-nums" /></label>
-                    </div>
-                  )}
                 </div>
               </details>
 
               <div className="flex gap-2 rounded-xl border border-primary/20 bg-primary-soft p-3 text-[10px] leading-5 text-secondary"><CheckCircle2 size={15} className="mt-0.5 shrink-0 text-primary" />Overspeed is reported when calibrated trajectory speed exceeds the configured limit.</div>
               <button type="submit" disabled={!sourceReady || active || !settingsReady} className="primary-button w-full">
-                {active ? <><LoaderCircle size={17} className="animate-spin" />Processing video</> : <><Sparkles size={17} />{sourceMode === "link" ? "Analyze Video Link" : "Analyze Traffic Video"}</>}
+                {active ? <><LoaderCircle size={17} className="animate-spin" />Processing video</> : <><Sparkles size={17} />Analyze Traffic Video</>}
               </button>
               {!active && disabledReason && <p className="text-center text-[10px] leading-4 text-muted">{disabledReason}</p>}
             </div>

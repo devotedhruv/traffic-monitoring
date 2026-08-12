@@ -5,7 +5,7 @@ import { cx, formatDateTime, formatSpeed, titleCase } from "../../lib/format";
 import type { PaginatedVehicles, VehicleDetection, VehicleQuery } from "../../types";
 
 function VehicleIcon({ type }: { type: VehicleDetection["vehicleType"] }) {
-  const Icon = type === "bus" ? Bus : type === "motorcycle" ? Bike : CarFront;
+  const Icon = type === "bus" ? Bus : type === "motorcycle" || type === "bicycle" ? Bike : CarFront;
   return <Icon size={18} className="text-primary" aria-hidden="true" />;
 }
 
@@ -27,7 +27,7 @@ export function DetectionTable({ data, query, loading, error, onQueryChange, onS
               <td className="px-4 py-3 font-bold tabular-nums text-primary">#{vehicle.trackingId}</td>
               <td className="px-4 py-3"><span className="flex items-center gap-2.5"><VehicleIcon type={vehicle.vehicleType} /><span>{titleCase(vehicle.vehicleType)}</span></span></td>
               <td className="px-4 py-3"><span className="inline-flex rounded-lg border border-border bg-surface-secondary px-2.5 py-1 font-semibold tabular-nums">{vehicle.plate || "UNKNOWN"}</span></td>
-              <td className="px-4 py-3 font-semibold tabular-nums">{formatSpeed(vehicle.speed)} km/h</td><td className="px-4 py-3 tabular-nums text-muted">{vehicle.speedLimit} km/h</td><td className="px-4 py-3"><StatusBadge status={vehicle.status} /></td><td className="px-4 py-3 tabular-nums text-muted">{formatDateTime(vehicle.detectedAt)}</td>
+              <td className="px-4 py-3 font-semibold tabular-nums">{vehicle.speedAvailable === false ? <span className="text-muted">Not measured</span> : `${formatSpeed(vehicle.speed)} km/h`}</td><td className="px-4 py-3 tabular-nums text-muted">{vehicle.speedLimit} km/h</td><td className="px-4 py-3"><StatusBadge status={vehicle.status} />{vehicle.violations?.filter((type) => type !== "OVERSPEED").map((type) => <span key={type} className="mt-1 block rounded bg-danger/10 px-1.5 py-0.5 text-[8px] font-bold text-danger">{type.replaceAll("_", " ")}</span>)}</td><td className="px-4 py-3 tabular-nums text-muted">{formatDateTime(vehicle.detectedAt)}</td>
               <td className="px-4 py-3">{typeof confidence === "number" ? <div className="w-20"><span className="font-semibold tabular-nums">{Math.round(confidence * 100)}%</span><div className="mt-1 h-1 overflow-hidden rounded-full bg-elevated"><div className="h-full rounded-full bg-primary" style={{ width: `${confidence * 100}%` }} /></div></div> : <span className="text-muted" title="Confidence was not stored for this detection">Not recorded</span>}</td>
               <td className="px-4 py-3"><span className="flex gap-2"><button type="button" className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-surface hover:bg-elevated hover:text-primary" onClick={(event) => { event.stopPropagation(); onSelect(vehicle); }} aria-label={`View detection ${vehicle.trackingId}`}><Eye size={15} /></button><button type="button" className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-surface hover:bg-elevated hover:text-primary" onClick={(event) => { event.stopPropagation(); onSelect(vehicle); }} aria-label={`More actions for detection ${vehicle.trackingId}`}><MoreVertical size={15} /></button></span></td>
             </tr>})}</tbody>

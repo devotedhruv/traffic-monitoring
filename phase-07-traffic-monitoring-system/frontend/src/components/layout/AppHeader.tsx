@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Activity, BarChart3, ChevronDown, Clock3, LayoutDashboard, LogOut, Menu, Radio, Sparkles } from "lucide-react";
 import { useAuth } from "../../app/AuthContext";
 import { useLive } from "../../app/LiveContext";
 import { navigate, usePathname } from "../../app/router";
 import { config } from "../../lib/config";
 import { cx } from "../../lib/format";
+import { api } from "../../services/api";
 import { Link } from "../ui/Link";
 import { ThemeToggle } from "../ui/ThemeToggle";
 
@@ -20,6 +22,7 @@ export function AppHeader({ collapsed, onMenu }: { collapsed: boolean; onMenu: (
   const pathname = usePathname().replace(/\/+$/, "") || "/";
   const { connection } = useLive();
   const { user, signOut } = useAuth();
+  const cameras = useQuery({ queryKey: ["cameras"], queryFn: api.getCameras });
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(timer);
@@ -36,7 +39,7 @@ export function AppHeader({ collapsed, onMenu }: { collapsed: boolean; onMenu: (
         </nav>
         <div className="ml-auto flex min-w-0 items-center gap-2 sm:gap-3">
           {config.useMocks && <span className="hidden rounded-full border border-warning/30 bg-warning/10 px-2.5 py-1 text-[9px] font-bold tracking-wider text-warning 2xl:block">DEMO DATA</span>}
-          <label className="hidden items-center gap-2 text-xs text-muted lg:flex"><span className="hidden xl:inline">Camera</span><span className="relative"><select className="h-10 appearance-none rounded-xl border border-border bg-surface px-3 pr-9 text-xs font-semibold text-ink hover:border-border-strong" aria-label="Select camera"><option>Camera 01 · North Junction</option></select><ChevronDown className="pointer-events-none absolute right-3 top-3 text-muted" size={14} /></span></label>
+          <label className="hidden items-center gap-2 text-xs text-muted lg:flex"><span className="hidden xl:inline">Camera</span><span className="relative"><select className="h-10 appearance-none rounded-xl border border-border bg-surface px-3 pr-9 text-xs font-semibold text-ink hover:border-border-strong" aria-label="Select camera">{(cameras.data ?? [{ id: "camera-01", name: "North Junction" }]).map((camera) => <option key={camera.id} value={camera.id}>{camera.name}</option>)}</select><ChevronDown className="pointer-events-none absolute right-3 top-3 text-muted" size={14} /></span></label>
           <div className={cx("live-badge", connection === "connected" ? "text-success" : connection === "reconnecting" ? "text-warning" : "text-danger")} aria-live="polite"><Radio size={14} /><span>{label}</span></div>
           <time className="hidden min-w-[148px] text-right text-[11px] tabular-nums text-muted 2xl:block"><span className="block">{new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(now)}</span><strong className="block text-xs text-ink">{new Intl.DateTimeFormat(undefined, { timeStyle: "medium" }).format(now)}</strong></time>
           <ThemeToggle />

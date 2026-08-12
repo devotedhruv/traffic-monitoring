@@ -3,10 +3,12 @@
 import base64
 import hashlib
 import hmac
+import logging
 import re
 import secrets
+import sqlite3
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Any
+from typing import Annotated, Any, NoReturn
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field, field_validator
@@ -21,6 +23,7 @@ from src.database import (
 )
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
+log = logging.getLogger("trafficops.auth")
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 COMMON_EMAIL_DOMAIN_TYPOS = {
     "gmaiil.com": "gmail.com",
@@ -32,6 +35,14 @@ COMMON_EMAIL_DOMAIN_TYPOS = {
 SCRYPT_N = 2**14
 SCRYPT_R = 8
 SCRYPT_P = 1
+
+
+def _storage_unavailable(error: sqlite3.Error) -> NoReturn:
+    log.exception("Authentication database operation failed")
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Authentication is temporarily unavailable. Please try again.",
+    ) from error
 
 
 def email_domain_suggestion(email: str) -> str | None:
@@ -140,7 +151,10 @@ def current_user_from_token(token: str | None) -> dict[str, Any] | None:
 def require_user(
     session_token: Annotated[str | None, Cookie(alias=AUTH_COOKIE_NAME)] = None,
 ) -> dict[str, Any]:
-    user = current_user_from_token(session_token)
+    try:
+        user = current_user_from_token(session_token)
+    except sqlite3.Error as error:
+        _storage_unavailable(error)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     return user
@@ -151,20 +165,30 @@ CurrentUser = Annotated[dict[str, Any], Depends(require_user)]
 
 @router.post("/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def signup(payload: SignUpRequest, response: Response):
-    user = create_user(payload.name, payload.email, hash_password(payload.password))
+    try:
+        user = create_user(payload.name, payload.email, hash_password(payload.password))
+        if user is not None:
+            _set_session(response, user["id"])
+    except sqlite3.Error as error:
+        _storage_unavailable(error)
     if user is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists")
-    _set_session(response, user["id"])
     return {"user": user}
 
 
 @router.post("/signin", response_model=AuthResponse)
 def signin(payload: SignInRequest, response: Response):
-    credentials = get_user_credentials(payload.email)
+    try:
+        credentials = get_user_credentials(payload.email)
+    except sqlite3.Error as error:
+        _storage_unavailable(error)
     if credentials is None or not verify_password(payload.password, credentials["passwordHash"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email or password is incorrect")
     user = {key: value for key, value in credentials.items() if key != "passwordHash"}
-    _set_session(response, user["id"])
+    try:
+        _set_session(response, user["id"])
+    except sqlite3.Error as error:
+        _storage_unavailable(error)
     return {"user": user}
 
 
@@ -177,5 +201,8 @@ def me(user: CurrentUser):
 def signout(request: Request, response: Response):
     token = request.cookies.get(AUTH_COOKIE_NAME)
     if token:
-        delete_auth_session(_token_hash(token))
+        try:
+            delete_auth_session(_token_hash(token))
+        except sqlite3.Error as error:
+            _storage_unavailable(error)
     response.delete_cookie(AUTH_COOKIE_NAME, path="/", secure=AUTH_COOKIE_SECURE, httponly=True, samesite="lax")

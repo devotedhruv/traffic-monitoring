@@ -5,7 +5,9 @@ The Phase 7 application now has two runtime surfaces:
 - the original Tkinter program in `src/main.py`;
 - the web-connected FastAPI runtime in `run_web.py`.
 
-The FastAPI runtime owns one YOLO tracking worker and exposes its output through REST, MJPEG, and WebSocket. The React frontend consumes those interfaces; it never reads SQLite or Python process memory directly. A separate single-file worker analyzes uploaded road footage or one public video link without writing its results to live SQLite history. Upload analysis uses YOLO11s, BoT-SORT, track lifecycle validation, optional feature-based camera stabilization, four-point road-plane calibration, line crossing, ground-plane speed trajectories, and temporary annotated evidence video.
+The FastAPI runtime owns one YOLO tracking worker and exposes its output through REST, MJPEG, and WebSocket. The React frontend consumes those interfaces; it never reads SQLite or Python process memory directly. A separate single-file worker analyzes uploaded road footage without writing its results to live SQLite history. Upload analysis uses YOLO11s, BoT-SORT, track lifecycle validation, optional feature-based camera stabilization, required four-point road-plane calibration, line crossing, robust ground-plane speed trajectories, and temporary annotated evidence video.
+
+For live cameras, capture and browser streaming remain independent from AI inference and a latest-frame queue prevents stale analysis from slowing the feed. Prerecorded files default to ordered analysis instead: sampled media frames are processed sequentially so ByteTrack identities and media timestamps remain suitable for speed estimation even on a CPU-only machine. This makes file playback advance at inference speed rather than wall-clock speed; set `TRAFFIC_LIVE_ACCURATE_FILE_MODE=false` when real-time demo playback matters more than speed quality. The dashboard reports stream FPS and AI-analysis FPS separately. The eye button below the feed switches between annotated and clean video while detection, tracking, speed measurement, persistence, and alerts continue in the background. On first use, an oversized file is converted to a reusable proxy under `output/live-cache`. Live monitoring defaults to `yolov8n.pt` at 640 px, a 0.10 confidence threshold, and a high-recall ByteTrack profile. The bundled `traffic.mp4` also receives a central-road perspective profile (13 m × 50 m); adjust `TRAFFIC_LIVE_ROAD_POINTS`, `TRAFFIC_LIVE_ROAD_WIDTH_METERS`, and `TRAFFIC_LIVE_ROAD_LENGTH_METERS` when a surveyed site measurement is available. Override `TRAFFIC_LIVE_FILE_ANALYSIS_FPS`, `TRAFFIC_LIVE_MODEL_PATH`, `TRAFFIC_LIVE_IMAGE_SIZE`, `TRAFFIC_LIVE_CONFIDENCE`, `TRAFFIC_LIVE_STREAM_FPS`, `TRAFFIC_LIVE_STREAM_WIDTH`, `TRAFFIC_LIVE_TRACKER`, or `TRAFFIC_LIVE_PREPROCESS_FILES` when hardware and accuracy requirements differ.
 
 ## Local development
 
@@ -61,18 +63,27 @@ Do not commit real camera credentials. Use a deployment secret manager in produc
 - `GET /api/dashboard/summary`
 - `GET /api/vehicles`
 - `GET /api/vehicles/{id}`
+- `GET /api/plates` for confirmed OCR reads joined to their tracked vehicle records
 - `GET /api/analytics?range=today`
 - `GET /api/cameras`
+- `POST /api/cameras/browser/start` and `POST /api/cameras/{camera_id}/stop`
+- `GET|POST /api/cameras/{camera_id}/calibration`
 - `GET /api/cameras/{camera_id}/stream`
 - `POST /api/video-analysis` with a raw video body and filename/calibration query parameters
-- `POST /api/video-analysis/link` with a public link, rights confirmation, and calibration JSON
 - `GET /api/video-analysis/{job_id}`
 - `GET /api/video-analysis/{job_id}/video` for the temporary annotated H.264 result
 - `WS /ws/live`
+- `WS /ws/cameras/{camera_id}/ingest` for authenticated, timestamped browser JPEG frames
 
-Uploaded and linked videos are limited to 500 MB by default, are processed from temporary storage, and are deleted when the analysis completes or fails. Linked videos are also limited to 120 minutes. Completed reports remain in process memory for six hours and are lost when the backend restarts.
+Uploaded videos are limited to 500 MB by default, are processed from temporary storage,
+and are deleted when the analysis completes or fails. Completed reports remain in
+process memory for six hours and are lost when the backend restarts.
 
-Link ingestion accepts a single public video from an allowlisted source such as YouTube, Google Drive, Instagram, TikTok, Facebook, X, Vimeo, Twitch, Reddit, Loom, Dropbox, or OneDrive. It does not use cookies or credentials, and it rejects playlists, folders, live streams, private URLs, and private-network destinations. Extend the host allowlist for another trusted yt-dlp source with a comma-separated `TRAFFIC_ALLOWED_VIDEO_LINK_HOSTS` value.
+The dashboard can also use a browser webcam. Open **Browser webcam**, grant camera
+permission, choose a device, and connect. Browser camera access requires `localhost`
+or HTTPS. The client sends at most one frame at a time and the backend keeps only the
+newest pending frames, preventing delayed results when inference is slower than the
+camera. Browser and configured-video road calibrations are stored separately.
 
 ## Perspective and speed calibration
 
@@ -106,14 +117,55 @@ variables are:
 
 ```env
 TRAFFIC_PLATE_MODEL_PATH=models/trafficops-plate-best.pt
+TRAFFIC_PLATE_OCR_ENGINE=tesseract
+TRAFFIC_PLATE_OCR_LANGUAGES=eng
+TRAFFIC_PLATE_CONFIDENCE=0.35
+TRAFFIC_PLATE_MIN_QUALITY=0.18
+TRAFFIC_PLATE_SAMPLE_SECONDS=0.75
 TRAFFIC_HELMET_MODEL_PATH=models/trafficops-helmet-best.pt
+TRAFFIC_LIVE_HELMET_CONFIDENCE=0.35
+TRAFFIC_LIVE_HELMET_CONFIRMATIONS=3
+TRAFFIC_LIVE_HELMET_SAMPLE_SECONDS=0.75
 TRAFFIC_TESSERACT_CMD=tesseract
 ```
 
 Number-plate OCR and helmet violations remain unavailable until those validated
 weights are supplied. The result API exposes a capability map, and the frontend shows
-"not configured" instead of generating placeholder results. Wrong-direction events
-use the selected allowed direction and the calibrated ground-plane trajectory.
+"not configured" instead of generating placeholder results. Live helmet inspection is
+limited to a person associated with a tracked motorcycle, samples the rider head crop,
+and requires repeated recent `no_helmet` observations before emitting one event per
+track.
+
+Live number-plate recognition runs the dedicated detector only inside each tracked
+vehicle crop, quality-gates the plate image, and confirms text only after consistent
+OCR observations across frames. A confirmed plate, OCR confidence, and evidence crop
+are written back to that vehicle's database row and shown together in the dashboard's
+Number Plate Recognition section. Generic vehicle weights are intentionally not used
+to invent a plate value.
+
+For Devanagari OCR, install the Nepali Tesseract language data and set
+`TRAFFIC_PLATE_OCR_LANGUAGES=eng+nep`.
+
+Wrong-lane monitoring also remains "not configured" until measured camera-specific
+lane rules are saved through `POST /api/cameras/{camera_id}/lanes` or supplied as a
+JSON array in `TRAFFIC_LIVE_LANE_RULES`. Every rule uses normalized calibrated-road
+width boundaries (`minX`, `maxX`), an `allowedDirection`, optional
+`allowedVehicleTypes`, and `boundaryTolerance`. For example, after replacing the
+boundaries and rules with surveyed site values:
+
+```json
+[
+  {"laneId":1,"minX":0.0,"maxX":0.5,"allowedDirection":"approaching","allowedVehicleTypes":["car","motorcycle"],"boundaryTolerance":0.03},
+  {"laneId":2,"minX":0.5,"maxX":1.0,"allowedDirection":"moving_away","allowedVehicleTypes":[],"boundaryTolerance":0.03}
+]
+```
+
+The example is schema documentation, not a rule for the bundled video. Configure only
+measured legal lane rules. The evaluator ignores boundary points, immature/stationary
+tracks, and short lane transitions; `WRONG_DIRECTION` uses the separate global
+`TRAFFIC_LIVE_ALLOWED_DIRECTION` rule. Confirmed violations are deduplicated, stored
+with evidence under `output/violations`, exposed by the violation APIs, and published
+over the existing WebSocket.
 
 ## Real-world security and operations
 
