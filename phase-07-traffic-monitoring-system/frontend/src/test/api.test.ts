@@ -11,7 +11,11 @@ describe("API configuration", () => {
   it("keeps endpoint paths centralized", () => {
     expect(endpoints.vehicle(12)).toBe("/api/vehicles/12");
     expect(endpoints.stream("camera-01")).toContain("camera-01");
-    expect(endpoints.videoAnalysisLink).toBe("/api/video-analysis/link");
+    expect(endpoints.cameraLanes("camera-01")).toContain("/lanes");
+    expect(endpoints.cameraCalibration("camera-01")).toContain("/calibration");
+    expect(endpoints.startBrowserCamera).toBe("/api/cameras/browser/start");
+    expect(endpoints.plates).toBe("/api/plates");
+    expect(endpoints.violations).toBe("/api/violations");
     expect(endpoints.videoAnalysisJob("job 12")).toBe("/api/video-analysis/job%2012");
   });
 
@@ -56,26 +60,4 @@ describe("API configuration", () => {
     vi.unstubAllGlobals();
   });
 
-  it("queues a public video link with rights confirmation", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ id: "job-link", status: "queued", sourceType: "link" })
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    await api.startLinkVideoAnalysis({
-      videoUrl: "https://www.youtube.com/watch?v=road",
-      location: "Ring Road",
-      speedLimit: 50,
-      metersPerPixel: 0.05,
-      confirmedRights: true
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/api/video-analysis/link"),
-      expect.objectContaining({ method: "POST" })
-    );
-    expect(fetchMock.mock.calls[0][1]?.body).toContain("\"confirmedRights\":true");
-    vi.unstubAllGlobals();
-  });
 });

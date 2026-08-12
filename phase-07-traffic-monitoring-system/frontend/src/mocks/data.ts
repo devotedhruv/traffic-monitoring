@@ -1,6 +1,6 @@
 import type { AnalyticsData, AnalyticsRange, DashboardSummary, PaginatedVehicles, VehicleDetection, VehicleQuery, VehicleStatus, VehicleType } from "../types";
 
-const types: VehicleType[] = ["car", "motorcycle", "bus", "truck"];
+const types: VehicleType[] = ["car", "motorcycle", "bicycle", "bus", "truck"];
 const plates = ["BA 12 PA 1234", "BA 08 CHA 4421", "GA 03 PA 9022", null, "NA 05 KHA 7810"];
 const baseTime = Date.now();
 
@@ -28,6 +28,7 @@ export async function getMockVehicles(query: VehicleQuery): Promise<PaginatedVeh
     (!query.status || vehicle.status === query.status) &&
     (!query.type || vehicle.vehicleType === query.type) &&
     (!query.speed || (query.speed === "over_limit" ? vehicle.speed > vehicle.speedLimit : vehicle.speed <= vehicle.speedLimit)) &&
+    (!query.violation || vehicle.violations?.includes(query.violation)) &&
     (!query.date || Date.now() - new Date(vehicle.detectedAt).getTime() <= (query.date === "today" ? 86_400_000 : 604_800_000)) &&
     (!needle || (vehicle.plate ?? "unknown").toLowerCase().includes(needle) || String(vehicle.trackingId).includes(needle))
   );
@@ -60,7 +61,7 @@ export async function getMockAnalytics(range: AnalyticsRange): Promise<Analytics
     : Array.from({ length: count }, (_, i) => `${String(8 + i * 2).padStart(2, "0")}:00`);
   return delay({
     timeline: labels.map((label, i) => ({ label, detections: 18 + ((i * 13) % 26), overspeed: 3 + ((i * 5) % 11) })),
-    byType: types.map((name, i) => ({ name, value: [29, 13, 6, 5][i] })),
+    byType: types.map((name, i) => ({ name, value: [25, 13, 4, 6, 5][i] })),
     byStatus: [
       { name: "NORMAL" as VehicleStatus, value: 31 },
       { name: "OVERSPEED" as VehicleStatus, value: 22 }

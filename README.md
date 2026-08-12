@@ -88,10 +88,14 @@ npm run dev
 Backend सँग frontend जोड्न `frontend/.env` मा यो value हुनुपर्छ:
 
 ```env
-VITE_API_BASE_URL=http://localhost:8000
-VITE_WS_URL=ws://localhost:8000/ws/live
+VITE_API_BASE_URL=
+VITE_WS_URL=
 VITE_USE_MOCKS=false
 ```
+
+Development मा Vite ले `/api` र `/ws` request लाई local backend port `8000`
+मा proxy गर्छ। त्यसैले frontend लाई `localhost:5173` वा देखाइएको LAN address बाट
+खोल्दा पनि browser ले गलत device को `localhost` प्रयोग गर्दैन।
 
 Frontend `http://localhost:5173` मा खोल्नुहोस्।
 

@@ -10,7 +10,10 @@ import { VehicleDetailsDrawer } from "./VehicleDetailsDrawer";
 
 function initialQuery(compact: boolean): VehicleQuery {
   const params = new URLSearchParams(window.location.search);
-  return { page: 1, pageSize: compact ? 10 : 20, status: params.get("status") === "OVERSPEED" ? "OVERSPEED" : "", type: "", speed: "", date: compact ? "" : "today", search: "", sort: "time_desc" };
+  const violation = ["OVERSPEED", "NO_HELMET", "WRONG_LANE", "WRONG_DIRECTION"].includes(params.get("violation") ?? "")
+    ? params.get("violation") as VehicleQuery["violation"] : "";
+  const search = (params.get("search") ?? "").slice(0, 100);
+  return { page: 1, pageSize: compact ? 10 : 20, status: params.get("status") === "OVERSPEED" ? "OVERSPEED" : "", type: "", speed: "", violation, date: compact || violation || search ? "" : "today", search, sort: "time_desc" };
 }
 
 function exportRows(rows: VehicleDetection[]) {

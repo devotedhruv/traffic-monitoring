@@ -14,6 +14,8 @@ export function ActiveVehicleCard({ vehicle }: { vehicle: VehicleDetection | nul
         <div><dt className="text-xs text-muted">Detected</dt><dd className="mt-0.5 tabular-nums">{formatTime(vehicle.detectedAt)}</dd></div>
         <div><dt className="text-xs text-muted">Speed</dt><dd className="mt-0.5 font-semibold tabular-nums">{formatSpeed(vehicle.speed)} km/h</dd></div>
         <div><dt className="text-xs text-muted">Limit</dt><dd className="mt-0.5 tabular-nums">{vehicle.speedLimit} km/h</dd></div>
+        <div><dt className="text-xs text-muted">Speed confidence</dt><dd className="mt-0.5 font-semibold tabular-nums">{vehicle.speedConfidence == null ? "—" : `${Math.round(vehicle.speedConfidence * 100)}%`}</dd></div>
+        <div><dt className="text-xs text-muted">Calibration</dt><dd className="mt-0.5 font-semibold">{vehicle.speedCalibration === "PERSPECTIVE_ESTIMATED" ? "Perspective estimate" : "Pixel-scale fallback"}</dd></div>
       </dl>
       <div className="mt-4"><StatusBadge status={vehicle.status} verbose /></div>
     </div>

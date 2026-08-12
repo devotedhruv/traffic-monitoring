@@ -38,4 +38,17 @@ describe("public and authentication experience", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Passwords do not match");
     expect(fetch).toHaveBeenCalledTimes(1);
   });
+
+  it("catches a common Gmail domain typo before creating an account", async () => {
+    window.history.replaceState(null, "", "/sign-up");
+    render(<App />);
+    await screen.findByRole("heading", { name: /start with trafficops/i });
+    fireEvent.change(screen.getByPlaceholderText("Traffic operator"), { target: { value: "Road Admin" } });
+    fireEvent.change(screen.getByPlaceholderText("you@organization.com"), { target: { value: "admin@gmaiil.com" } });
+    fireEvent.change(screen.getByPlaceholderText("At least 8 characters"), { target: { value: "correct-pass" } });
+    fireEvent.change(screen.getByPlaceholderText("Repeat your password"), { target: { value: "correct-pass" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Did you mean admin@gmail.com?");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
 });

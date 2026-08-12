@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import subprocess
 import threading
 from collections import Counter, defaultdict, deque
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -49,40 +51,51 @@ class EasyOCREngine:
 
 
 class TesseractOCREngine:
-    def __init__(self, languages: str = "eng+nep"):
+    def __init__(self, languages: str = "eng", command: str = "tesseract"):
         self.languages = languages
-        try:
-            import pytesseract
-
-            self.pytesseract = pytesseract
-            self.available = True
-        except Exception as exc:
-            self.pytesseract = None
-            self.available = False
-            log.warning("Tesseract OCR unavailable: %s", exc)
+        self.command = shutil.which(command) if command else None
+        self.available = self.command is not None
 
     def read(self, image: np.ndarray) -> list[tuple[str, float]]:
-        if self.pytesseract is None:
+        if self.command is None or image.size == 0:
+            return []
+        import cv2
+
+        encoded, payload = cv2.imencode(".png", image)
+        if not encoded:
             return []
         try:
-            data = self.pytesseract.image_to_data(
-                image,
-                lang=self.languages,
-                config="--psm 7",
-                output_type=self.pytesseract.Output.DICT,
+            completed = subprocess.run(
+                [
+                    self.command, "stdin", "stdout", "-l", self.languages,
+                    "--psm", "7", "tsv",
+                ],
+                input=payload.tobytes(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=8,
+                check=False,
             )
-        except Exception as exc:
+        except (OSError, subprocess.TimeoutExpired) as exc:
             log.warning("Tesseract plate read failed: %s", exc)
             return []
-        results: list[tuple[str, float]] = []
-        for text, confidence in zip(data.get("text", []), data.get("conf", [])):
+        grouped: dict[tuple[str, ...], list[tuple[str, float]]] = defaultdict(list)
+        lines = completed.stdout.decode(errors="ignore").splitlines()[1:]
+        for line in lines:
+            columns = line.split("\t", 11)
+            if len(columns) < 12:
+                continue
+            confidence, text = columns[10], columns[11]
             try:
                 score = max(0.0, min(1.0, float(confidence) / 100.0))
             except (TypeError, ValueError):
                 continue
             if str(text).strip():
-                results.append((str(text), score))
-        return results
+                grouped[tuple(columns[1:5])].append((str(text).strip(), score))
+        return [
+            (" ".join(text for text, _ in words), sum(score for _, score in words) / len(words))
+            for words in grouped.values() if words
+        ]
 
 
 @dataclass(frozen=True)
@@ -197,11 +210,15 @@ class PlateOCRService:
         self._executor.shutdown(wait=False, cancel_futures=True)
 
 
-def create_ocr_engine(name: str, gpu: bool = False) -> OCREngine:
+def create_ocr_engine(
+    name: str,
+    gpu: bool = False,
+    command: str = "tesseract",
+    languages: str = "eng",
+) -> OCREngine:
     normalized = name.strip().lower()
     if normalized == "easyocr":
         return EasyOCREngine(gpu=gpu)
     if normalized == "tesseract":
-        return TesseractOCREngine()
+        return TesseractOCREngine(languages=languages, command=command)
     return UnavailableOCREngine()
-

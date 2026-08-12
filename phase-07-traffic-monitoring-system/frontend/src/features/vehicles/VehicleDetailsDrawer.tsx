@@ -17,7 +17,8 @@ export function VehicleDetailsDrawer({ vehicle, onClose }: { vehicle: VehicleDet
   const details = [
     ["Tracking ID", `#${vehicle.trackingId}`], ["Database record", `#${vehicle.id}`],
     ["Vehicle type", titleCase(vehicle.vehicleType)], ["Plate", vehicle.plate || "UNKNOWN"],
-    ["Speed", `${formatSpeed(vehicle.speed)} km/h`], ["Speed limit", `${vehicle.speedLimit} km/h`],
+    ["Speed", vehicle.speedAvailable === false ? "Not measured" : `${formatSpeed(vehicle.speed)} km/h`], ["Speed limit", `${vehicle.speedLimit} km/h`],
+    ["Violations", vehicle.violations?.length ? vehicle.violations.map((value) => value.replaceAll("_", " ")).join(", ") : "None"],
     ["Detected", formatDateTime(vehicle.detectedAt)], ["Camera", vehicle.cameraName || vehicle.cameraId]
   ];
   return (

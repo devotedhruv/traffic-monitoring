@@ -9,6 +9,8 @@ from web.traffic_pipeline import (
     _build_road_plane,
     _record_ground_speed,
     _record_line_crossing,
+    _serialize_track,
+    _trimmed_average,
 )
 
 
@@ -52,6 +54,25 @@ class TrafficPipelineTests(unittest.TestCase):
         _record_line_crossing(track, (1, 9), 0.8, counting_y=10)
         _record_line_crossing(track, (1, 11), 1.0, counting_y=10)
         self.assertEqual(track.counted_at, 1.0)
+
+    def test_speed_requires_multiple_temporal_samples(self):
+        track = _Track(tracking_id=9, first_seen=0)
+        for index in range(4):
+            timestamp = index * 0.2
+            _record_ground_speed(track, (0, timestamp * 10), timestamp)
+        vehicle = _serialize_track(track, speed_limit=50, calibrated=True, allowed_direction="both")
+        self.assertIsNone(vehicle["estimatedSpeed"])
+        self.assertEqual(vehicle["status"], "INSUFFICIENT_DATA")
+
+        for index in range(4, 9):
+            timestamp = index * 0.2
+            _record_ground_speed(track, (0, timestamp * 10), timestamp)
+        vehicle = _serialize_track(track, speed_limit=50, calibrated=True, allowed_direction="both")
+        self.assertAlmostEqual(vehicle["estimatedSpeed"], 36, places=1)
+        self.assertGreaterEqual(vehicle["speedSamples"], 3)
+
+    def test_speed_average_rejects_short_track_outlier(self):
+        self.assertAlmostEqual(_trimmed_average([29, 30, 31, 160]), 30, places=2)
 
 
 if __name__ == "__main__":

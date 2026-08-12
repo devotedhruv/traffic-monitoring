@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { config } from "../lib/config";
 import { nextMockDetection } from "../mocks/data";
-import type { ConnectionStatus, LiveEvent, VehicleDetection } from "../types";
+import type { ConnectionStatus, LiveEvent, VehicleDetection, ViolationEvent } from "../types";
 
 const isDetection = (value: unknown): value is VehicleDetection => {
   if (!value || typeof value !== "object") return false;
@@ -11,11 +11,22 @@ const isDetection = (value: unknown): value is VehicleDetection => {
     typeof item.speed === "number" && (item.status === "NORMAL" || item.status === "OVERSPEED");
 };
 
+const isViolation = (value: unknown): value is ViolationEvent => {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<ViolationEvent>;
+  return typeof item.id === "number" && typeof item.trackingId === "number" &&
+    ["OVERSPEED", "NO_HELMET", "WRONG_LANE", "WRONG_DIRECTION"].includes(String(item.type));
+};
+
 export function useLiveEvents() {
   const client = useQueryClient();
   const [connection, setConnection] = useState<ConnectionStatus>(config.useMocks ? "connected" : "reconnecting");
   const [latest, setLatest] = useState<VehicleDetection | null>(null);
+  const [latestViolation, setLatestViolation] = useState<ViolationEvent | null>(null);
   const [fps, setFps] = useState(27.4);
+  const [analysisFps, setAnalysisFps] = useState(config.useMocks ? 15 : 0);
+  const [activeTracks, setActiveTracks] = useState(0);
+  const [activeDetections, setActiveDetections] = useState(0);
   const seen = useRef(new Set<string>());
   const lastQueryRefresh = useRef(0);
 
@@ -30,11 +41,12 @@ export function useLiveEvents() {
       if (seen.current.has(key)) return;
       seen.current.add(key);
       if (seen.current.size > 300) seen.current = new Set(Array.from(seen.current).slice(-150));
-      setLatest(detection);
+      if (detection.speedAvailable !== false) setLatest(detection);
       if (Date.now() - lastQueryRefresh.current >= 2000) {
         client.invalidateQueries({ queryKey: ["summary"] });
         client.invalidateQueries({ queryKey: ["vehicles"] });
         client.invalidateQueries({ queryKey: ["analytics"] });
+        if (detection.plate) client.invalidateQueries({ queryKey: ["plates"] });
         lastQueryRefresh.current = Date.now();
       }
     };
@@ -58,8 +70,17 @@ export function useLiveEvents() {
         try {
           const event = JSON.parse(String(message.data)) as LiveEvent;
           if (event.type === "vehicle_detection" && isDetection(event.data)) receiveDetection(event.data);
+          if (event.type === "violation_event" && isViolation(event.data)) {
+            setLatestViolation(event.data);
+            client.invalidateQueries({ queryKey: ["violations"] });
+            client.invalidateQueries({ queryKey: ["violation-summary"] });
+            client.invalidateQueries({ queryKey: ["vehicles"] });
+          }
           if (event.type === "system_status" && typeof event.data?.fps === "number") {
             setFps(event.data.fps);
+            if (typeof event.data.analysisFps === "number") setAnalysisFps(event.data.analysisFps);
+            if (typeof event.data.activeTracks === "number") setActiveTracks(event.data.activeTracks);
+            if (typeof event.data.activeDetections === "number") setActiveDetections(event.data.activeDetections);
             setConnection(event.data.connection);
           }
         } catch {
@@ -87,5 +108,5 @@ export function useLiveEvents() {
     };
   }, [client]);
 
-  return { connection, latest, fps };
+  return { connection, latest, latestViolation, fps, analysisFps, activeTracks, activeDetections };
 }

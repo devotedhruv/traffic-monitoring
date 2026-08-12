@@ -1,6 +1,7 @@
 export type VehicleStatus = "NORMAL" | "OVERSPEED";
+export type ViolationType = "OVERSPEED" | "NO_HELMET" | "WRONG_LANE" | "WRONG_DIRECTION";
 export type ConnectionStatus = "connected" | "reconnecting" | "offline";
-export type VehicleType = "car" | "motorcycle" | "bus" | "truck" | "unknown";
+export type VehicleType = "bicycle" | "car" | "motorcycle" | "bus" | "truck" | "unknown";
 export type AnalyticsRange = "hour" | "today" | "week";
 export type VideoAnalysisStatus = "queued" | "processing" | "completed" | "failed";
 
@@ -38,6 +39,9 @@ export interface VehicleDetection {
   trackingId: number;
   vehicleType: VehicleType;
   plate: string | null;
+  plateConfidence?: number | null;
+  plateStatus?: "NOT_CONFIGURED" | "NOT_DETECTED" | "POSSIBLE" | "CONFIRMED";
+  plateSnapshotUrl?: string | null;
   speed: number;
   speedLimit: number;
   status: VehicleStatus;
@@ -46,6 +50,11 @@ export interface VehicleDetection {
   cameraName?: string;
   snapshotUrl?: string | null;
   confidence?: number | null;
+  speedConfidence?: number | null;
+  speedSamples?: number;
+  speedCalibration?: "PERSPECTIVE_ESTIMATED" | "FALLBACK_PIXEL_SCALE" | "OUTSIDE_CALIBRATED_ZONE";
+  speedAvailable?: boolean;
+  violations?: ViolationType[];
 }
 
 export interface DashboardSummary {
@@ -61,6 +70,59 @@ export interface Camera {
   id: string;
   name: string;
   streamAvailable: boolean;
+  sourceType?: "configured" | "browser";
+  browserConnected?: boolean;
+}
+
+export interface LiveCameraCalibration {
+  sourcePoints: NormalizedPoint[];
+  roadWidthMeters: number;
+  roadLengthMeters: number;
+  laneCount: number;
+  quality: number;
+}
+
+export interface CameraSettings {
+  confidence: number;
+  showOverlays: boolean;
+}
+
+export interface LaneRule {
+  laneId: number;
+  minX: number;
+  maxX: number;
+  allowedDirection: "both" | "approaching" | "moving_away" | "left_to_right" | "right_to_left";
+  allowedVehicleTypes: Exclude<VehicleType, "unknown">[];
+  boundaryTolerance: number;
+}
+
+export interface ViolationEvent {
+  id: number;
+  vehicleId: number | null;
+  trackingId: number;
+  type: ViolationType;
+  confidence: number;
+  cameraId: string;
+  cameraName?: string;
+  vehicleType: VehicleType;
+  laneId: number | null;
+  direction: string | null;
+  snapshotUrl: string | null;
+  detectedAt: string;
+}
+
+export interface Capability {
+  available: boolean;
+  reason: string | null;
+  model?: string | null;
+  method?: string | null;
+}
+
+export interface ViolationCapabilities {
+  plateRecognition: Capability;
+  helmetDetection: Capability;
+  wrongLaneDetection: Capability;
+  wrongDirectionDetection: Capability;
 }
 
 export interface VehicleQuery {
@@ -71,6 +133,7 @@ export interface VehicleQuery {
   search?: string;
   speed?: "" | "under_limit" | "over_limit";
   date?: "" | "today" | "week";
+  violation?: ViolationType | "";
   sort?: "time_desc" | "time_asc" | "speed_desc" | "speed_asc";
 }
 
@@ -94,28 +157,32 @@ export interface LiveDetectionEvent {
   data: VehicleDetection;
 }
 
+export interface LiveViolationEvent {
+  type: "violation_event";
+  data: ViolationEvent;
+}
+
 export interface SystemStatusEvent {
   type: "system_status";
   data: {
     connection: ConnectionStatus;
     fps: number;
+    analysisFps?: number;
+    activeTracks?: number;
+    activeDetections?: number;
+    speedCalibration?: string;
     cameraId: string;
     timestamp: string;
   };
 }
 
-export type LiveEvent = LiveDetectionEvent | SystemStatusEvent;
+export type LiveEvent = LiveDetectionEvent | LiveViolationEvent | SystemStatusEvent;
 
 export interface VideoAnalysisOptions {
   location: string;
   speedLimit: number;
   metersPerPixel: number;
   calibration?: RoadCalibration;
-}
-
-export interface VideoLinkAnalysisOptions extends VideoAnalysisOptions {
-  videoUrl: string;
-  confirmedRights: boolean;
 }
 
 export interface AnalyzedVehicle {
@@ -132,6 +199,7 @@ export interface AnalyzedVehicle {
   countedAtSeconds: number | null;
   trackedForSeconds: number;
   framesTracked: number;
+  speedSamples: number;
   estimatedSpeed: number | null;
   peakSpeed: number | null;
   speedConfidence: "LOW" | "MEDIUM" | "HIGH";

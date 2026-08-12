@@ -7,6 +7,7 @@ import json
 import os
 import threading
 from dataclasses import asdict, dataclass
+from functools import cached_property
 from pathlib import Path
 
 import cv2
@@ -21,10 +22,14 @@ class CameraCalibration:
     calibration_id: str
     quality: float = 1.0
 
-    def homography(self) -> np.ndarray:
+    @cached_property
+    def _homography(self) -> np.ndarray:
         image = np.asarray(self.image_points, dtype=np.float32)
         world = np.asarray(self.world_points, dtype=np.float32)
         return cv2.getPerspectiveTransform(image, world)
+
+    def homography(self) -> np.ndarray:
+        return self._homography
 
     def project(self, point: tuple[float, float]) -> tuple[float, float]:
         projected = cv2.perspectiveTransform(
@@ -95,4 +100,3 @@ class CameraCalibrationStore:
             self._calibrations[camera_id] = calibration
             self._save()
         return calibration
-

@@ -62,15 +62,6 @@ ALLOWED_LINK_HOSTS = DEFAULT_LINK_HOSTS | {
 }
 
 
-class LinkAnalysisRequest(BaseModel):
-    videoUrl: str = Field(min_length=8, max_length=2048)
-    location: str = Field(default="", max_length=160)
-    speedLimit: float = Field(default=SPEED_LIMIT, ge=5, le=200)
-    metersPerPixel: float = Field(default=METERS_PER_PIXEL, gt=0.0001, le=10)
-    confirmedRights: bool = False
-    calibration: CalibrationSettings | None = None
-
-
 @dataclass
 class _Track:
     tracking_id: int
@@ -193,6 +184,14 @@ async def start_video_analysis(
     ):
         raise HTTPException(status_code=415, detail="The uploaded file must be a video")
     calibration_settings = _parse_calibration(calibration)
+    if calibration_settings is None or not calibration_settings.enabled:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Four-point road calibration is required. Mark the visible road plane "
+                "and provide its actual measured width and length."
+            ),
+        )
 
     content_length = request.headers.get("content-length")
     if content_length:
@@ -238,34 +237,6 @@ async def start_video_analysis(
             calibration_settings,
         ),
         name=f"video-analysis-{job_id[:8]}",
-        daemon=True,
-    )
-    worker.start()
-    return jobs.get(job_id)
-
-
-@router.post("/link", status_code=status.HTTP_202_ACCEPTED)
-def start_link_video_analysis(payload: LinkAnalysisRequest):
-    """Queue a public social/cloud video link for temporary download and analysis."""
-    if not payload.confirmedRights:
-        raise HTTPException(
-            status_code=400,
-            detail="Confirm that you own the video or have permission to analyze it",
-        )
-    video_url = _validate_video_link(payload.videoUrl)
-    hostname = urlparse(video_url).hostname or "linked source"
-    job_id = jobs.create(f"Video from {hostname}", source_type="link")
-    worker = threading.Thread(
-        target=_run_link_analysis_job,
-        args=(
-            job_id,
-            video_url,
-            payload.location.strip(),
-            float(payload.speedLimit),
-            float(payload.metersPerPixel),
-            payload.calibration,
-        ),
-        name=f"link-analysis-{job_id[:8]}",
         daemon=True,
     )
     worker.start()

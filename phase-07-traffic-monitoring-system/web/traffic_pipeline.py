@@ -152,6 +152,9 @@ class _Track:
     last_ground_point: tuple[float, float] | None = None
     previous_ground_point: tuple[float, float] | None = None
     previous_timestamp: float | None = None
+    ground_history: deque[tuple[float, tuple[float, float]]] = field(
+        default_factory=lambda: deque(maxlen=45)
+    )
     speed_samples: deque[float] = field(default_factory=lambda: deque(maxlen=120))
     trail: deque[tuple[int, int]] = field(default_factory=lambda: deque(maxlen=36))
     frames_tracked: int = 0
@@ -392,7 +395,7 @@ def analyze_video(
                 persist=True,
                 tracker=settings.tracker,
                 classes=class_ids,
-                conf=0.25,
+                conf=0.18,
                 iou=0.55,
                 imgsz=DETECTOR_IMAGE_SIZE,
                 verbose=False,
@@ -585,14 +588,23 @@ def _build_road_plane(settings: CalibrationSettings, width: int, height: int) ->
 
 
 def _record_ground_speed(track: _Track, point: tuple[float, float], timestamp: float) -> None:
-    if track.previous_ground_point is not None and track.previous_timestamp is not None:
-        elapsed = timestamp - track.previous_timestamp
-        if elapsed > 0:
-            speed = math.dist(point, track.previous_ground_point) / elapsed * 3.6
-            previous = _trimmed_average(list(track.speed_samples))
-            acceleration = abs(speed - previous) / elapsed if previous is not None else 0
-            if math.isfinite(speed) and 0.5 <= speed <= 200 and acceleration <= 90:
-                track.speed_samples.append(speed)
+    track.ground_history.append((timestamp, point))
+    candidates = [
+        (sample_time, sample_point)
+        for sample_time, sample_point in track.ground_history
+        if 0.35 <= timestamp - sample_time <= 1.25
+    ]
+    if candidates:
+        sample_time, sample_point = min(
+            candidates,
+            key=lambda sample: abs((timestamp - sample[0]) - 0.65),
+        )
+        elapsed = timestamp - sample_time
+        speed = math.dist(point, sample_point) / elapsed * 3.6
+        previous = _trimmed_average(list(track.speed_samples))
+        acceleration = abs(speed - previous) / elapsed if previous is not None else 0
+        if math.isfinite(speed) and 0.5 <= speed <= 200 and acceleration <= 60:
+            track.speed_samples.append(speed)
     track.previous_ground_point = point
     track.previous_timestamp = timestamp
 
@@ -622,8 +634,14 @@ def _serialize_track(
     color = track.color_votes.most_common(1)[0][0] if track.color_votes else "UNKNOWN"
     plate = track.plate_votes.most_common(1)[0][0] if track.plate_votes else None
     lane = track.lane_votes.most_common(1)[0][0] if track.lane_votes else None
-    speed = _trimmed_average(list(track.speed_samples))
-    peak_speed = max(track.speed_samples) if track.speed_samples else None
+    minimum_speed_samples = 3 if calibrated else 5
+    reliable_samples = len(track.speed_samples) >= minimum_speed_samples
+    speed = _trimmed_average(list(track.speed_samples)) if reliable_samples else None
+    peak_speed = (
+        float(np.percentile(list(track.speed_samples), 90))
+        if reliable_samples
+        else None
+    )
     direction = _direction_label(track.first_ground_point, track.last_ground_point)
     if _is_wrong_direction(direction, allowed_direction):
         track.violations.add("WRONG_DIRECTION")
@@ -643,9 +661,10 @@ def _serialize_track(
         "countedAtSeconds": round(track.counted_at, 2) if track.counted_at is not None else None,
         "trackedForSeconds": round(max(0, track.last_seen - track.first_seen), 2),
         "framesTracked": track.frames_tracked,
+        "speedSamples": len(track.speed_samples),
         "estimatedSpeed": round(speed, 2) if speed is not None else None,
         "peakSpeed": round(peak_speed, 2) if peak_speed is not None else None,
-        "speedConfidence": "HIGH" if calibrated and len(track.speed_samples) >= 5 else "MEDIUM" if calibrated else "LOW",
+        "speedConfidence": "HIGH" if calibrated and len(track.speed_samples) >= 8 else "MEDIUM" if calibrated and reliable_samples else "LOW",
         "speedLimit": speed_limit,
         "status": "INSUFFICIENT_DATA" if speed is None else "OVERSPEED" if speed > speed_limit else "NORMAL",
         "direction": direction,
@@ -693,7 +712,7 @@ def _draw_track(frame: np.ndarray, track: _Track) -> None:
     cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2, cv2.LINE_AA)
     if len(track.trail) > 1:
         cv2.polylines(frame, [np.array(track.trail, dtype=np.int32)], False, color, 2, cv2.LINE_AA)
-    speed = _trimmed_average(list(track.speed_samples))
+    speed = _trimmed_average(list(track.speed_samples)) if len(track.speed_samples) >= 3 else None
     label = f"#{track.tracking_id} {vehicle_type}"
     if track.lane_votes:
         label += f" L{track.lane_votes.most_common(1)[0][0]}"
@@ -773,10 +792,17 @@ def _build_timeline(vehicles: list[dict[str, Any]], duration: float) -> list[dic
 def _trimmed_average(values: list[float]) -> float | None:
     if not values:
         return None
-    ordered = sorted(values)
+    ordered = np.asarray(sorted(values), dtype=np.float64)
+    if len(ordered) >= 3:
+        median = float(np.median(ordered))
+        mad = float(np.median(np.abs(ordered - median)))
+        tolerance = max(4.0, 3.0 * 1.4826 * mad)
+        inliers = ordered[np.abs(ordered - median) <= tolerance]
+        if len(inliers):
+            ordered = inliers
     trim = int(len(ordered) * 0.1) if len(ordered) >= 10 else 0
     selected = ordered[trim:len(ordered) - trim] if trim else ordered
-    return sum(selected) / len(selected)
+    return float(np.mean(selected))
 
 
 def _direction_label(

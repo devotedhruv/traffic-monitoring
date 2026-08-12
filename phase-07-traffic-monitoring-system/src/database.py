@@ -1,5 +1,6 @@
 """SQLite persistence and read models for the desktop and web applications."""
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -7,12 +8,16 @@ from typing import Any
 
 from config.settings import CAMERA_ID, DATABASE_PATH, SPEED_LIMIT
 
+SQLITE_BUSY_TIMEOUT_MS = 30_000
+
 
 @contextmanager
 def _connect():
-    connection = sqlite3.connect(DATABASE_PATH, timeout=10)
+    connection = sqlite3.connect(DATABASE_PATH, timeout=SQLITE_BUSY_TIMEOUT_MS / 1_000)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
+    connection.execute("PRAGMA synchronous = NORMAL")
     try:
         yield connection
         connection.commit()
@@ -25,6 +30,9 @@ def _connect():
 
 def create_database() -> None:
     with _connect() as connection:
+        # Live detections and browser sessions share this database. WAL lets
+        # authentication reads continue while the pipeline is saving events.
+        connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("""
             CREATE TABLE IF NOT EXISTS vehicles(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,6 +48,9 @@ def create_database() -> None:
             "vehicle_type": "TEXT DEFAULT 'unknown'",
             "camera_id": f"TEXT DEFAULT '{CAMERA_ID}'",
             "snapshot_url": "TEXT",
+            "plate_confidence": "REAL",
+            "plate_status": "TEXT DEFAULT 'NOT_DETECTED'",
+            "plate_image_path": "TEXT",
         }
         for column, definition in additions.items():
             if column not in existing:
@@ -67,6 +78,56 @@ def create_database() -> None:
         """)
         connection.execute("CREATE INDEX IF NOT EXISTS idx_auth_sessions_token ON auth_sessions(token_hash)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_auth_sessions_expiry ON auth_sessions(expires_at)")
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS violations(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                vehicle_id INTEGER,
+                tracking_id INTEGER NOT NULL,
+                violation_type TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                camera_id TEXT NOT NULL,
+                vehicle_type TEXT NOT NULL,
+                lane_id INTEGER,
+                direction TEXT,
+                evidence_path TEXT,
+                session_key TEXT NOT NULL,
+                source_generation INTEGER NOT NULL DEFAULT 0,
+                detected_at TEXT NOT NULL,
+                FOREIGN KEY(vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL,
+                UNIQUE(session_key, tracking_id, violation_type)
+            )
+        """)
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_violations_detected_at ON violations(detected_at)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_violations_type ON violations(violation_type)"
+        )
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS camera_lane_settings(
+                camera_id TEXT PRIMARY KEY,
+                rules_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS camera_calibration_settings(
+                camera_id TEXT PRIMARY KEY,
+                calibration_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        # Preserve historical overspeed records in the new violation read model.
+        connection.execute("""
+            INSERT OR IGNORE INTO violations(
+                vehicle_id, tracking_id, violation_type, confidence, camera_id,
+                vehicle_type, session_key, source_generation, detected_at
+            )
+            SELECT id, COALESCE(tracking_id, id), 'OVERSPEED', 1.0,
+                   COALESCE(camera_id, ?), COALESCE(vehicle_type, 'unknown'),
+                   'legacy:' || id, 0, REPLACE(time, ' ', 'T') || 'Z'
+            FROM vehicles WHERE status = 'OVERSPEED'
+        """, (CAMERA_ID,))
 
 
 def _serialize_user(row: sqlite3.Row) -> dict[str, Any]:
@@ -133,7 +194,7 @@ def delete_auth_session(token_hash: str) -> None:
 
 def save_vehicle(
     plate: str,
-    speed: float,
+    speed: float | None,
     status: str,
     tracking_id: int | None = None,
     vehicle_type: str = "unknown",
@@ -158,16 +219,200 @@ def update_vehicle_measurement(record_id: int, speed: float, status: str) -> Non
         )
 
 
+def update_vehicle_plate(
+    record_id: int,
+    plate: str,
+    confidence: float,
+    plate_status: str,
+    plate_image_path: str | None = None,
+) -> None:
+    with _connect() as connection:
+        connection.execute(
+            """UPDATE vehicles SET plate = ?, plate_confidence = ?, plate_status = ?,
+               plate_image_path = COALESCE(?, plate_image_path) WHERE id = ?""",
+            (plate, confidence, plate_status, plate_image_path, record_id),
+        )
+
+
+def save_violation(
+    vehicle_id: int | None,
+    tracking_id: int,
+    violation_type: str,
+    confidence: float,
+    camera_id: str,
+    vehicle_type: str,
+    session_key: str,
+    source_generation: int = 0,
+    lane_id: int | None = None,
+    direction: str | None = None,
+    evidence_path: str | None = None,
+    detected_at: str | None = None,
+) -> dict[str, Any] | None:
+    """Insert one violation per track/session/type and return it when newly created."""
+    timestamp = detected_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    with _connect() as connection:
+        cursor = connection.execute(
+            """INSERT OR IGNORE INTO violations(
+                   vehicle_id, tracking_id, violation_type, confidence, camera_id,
+                   vehicle_type, lane_id, direction, evidence_path, session_key,
+                   source_generation, detected_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                vehicle_id, tracking_id, violation_type, confidence, camera_id,
+                vehicle_type, lane_id, direction, evidence_path, session_key,
+                source_generation, timestamp,
+            ),
+        )
+        if cursor.rowcount == 0:
+            return None
+        row = connection.execute(
+            "SELECT * FROM violations WHERE id = ?", (cursor.lastrowid,)
+        ).fetchone()
+    return _serialize_violation(row)
+
+
+def _serialize_violation(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": int(row["id"]),
+        "vehicleId": row["vehicle_id"],
+        "trackingId": int(row["tracking_id"]),
+        "type": row["violation_type"],
+        "confidence": round(float(row["confidence"]), 3),
+        "cameraId": row["camera_id"],
+        "vehicleType": row["vehicle_type"],
+        "laneId": row["lane_id"],
+        "direction": row["direction"],
+        "snapshotUrl": f"/api/violations/{row['id']}/evidence" if row["evidence_path"] else None,
+        "detectedAt": row["detected_at"],
+    }
+
+
+def list_violations(
+    limit: int = 50,
+    violation_type: str = "",
+    since: str | None = None,
+) -> list[dict[str, Any]]:
+    clauses: list[str] = []
+    values: list[Any] = []
+    if violation_type:
+        clauses.append("violation_type = ?")
+        values.append(violation_type)
+    if since:
+        clauses.append("detected_at >= ?")
+        values.append(since)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with _connect() as connection:
+        rows = connection.execute(
+            f"SELECT * FROM violations {where} ORDER BY detected_at DESC, id DESC LIMIT ?",
+            [*values, limit],
+        ).fetchall()
+    return [_serialize_violation(row) for row in rows]
+
+
+def violation_summary(since: str | None = None) -> dict[str, Any]:
+    where = "WHERE detected_at >= ?" if since else ""
+    values = (since,) if since else ()
+    with _connect() as connection:
+        rows = connection.execute(
+            f"SELECT violation_type, COUNT(*) count FROM violations {where} GROUP BY violation_type",
+            values,
+        ).fetchall()
+        latest = connection.execute(
+            f"SELECT * FROM violations {where} ORDER BY detected_at DESC, id DESC LIMIT 1",
+            values,
+        ).fetchone()
+    counts = {row["violation_type"]: int(row["count"]) for row in rows}
+    return {
+        "total": sum(counts.values()),
+        "counts": counts,
+        "latest": _serialize_violation(latest) if latest else None,
+    }
+
+
+def get_violation_evidence_path(violation_id: int) -> str | None:
+    with _connect() as connection:
+        row = connection.execute(
+            "SELECT evidence_path FROM violations WHERE id = ?", (violation_id,)
+        ).fetchone()
+    return row["evidence_path"] if row else None
+
+
+def save_camera_lane_rules(camera_id: str, rules: list[dict[str, Any]]) -> None:
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    payload = json.dumps(rules, separators=(",", ":"))
+    with _connect() as connection:
+        connection.execute(
+            """INSERT INTO camera_lane_settings(camera_id, rules_json, updated_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(camera_id) DO UPDATE SET
+                   rules_json = excluded.rules_json, updated_at = excluded.updated_at""",
+            (camera_id, payload, now),
+        )
+
+
+def get_camera_lane_rules(camera_id: str) -> list[dict[str, Any]]:
+    with _connect() as connection:
+        row = connection.execute(
+            "SELECT rules_json FROM camera_lane_settings WHERE camera_id = ?", (camera_id,)
+        ).fetchone()
+    if row is None:
+        return []
+    try:
+        payload = json.loads(row["rules_json"])
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return payload if isinstance(payload, list) else []
+
+
+def save_camera_calibration(camera_id: str, calibration: dict[str, Any]) -> None:
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    payload = json.dumps(calibration, separators=(",", ":"))
+    with _connect() as connection:
+        connection.execute(
+            """INSERT INTO camera_calibration_settings(camera_id, calibration_json, updated_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(camera_id) DO UPDATE SET
+                   calibration_json = excluded.calibration_json,
+                   updated_at = excluded.updated_at""",
+            (camera_id, payload, now),
+        )
+
+
+def get_camera_calibration(camera_id: str) -> dict[str, Any] | None:
+    with _connect() as connection:
+        row = connection.execute(
+            "SELECT calibration_json FROM camera_calibration_settings WHERE camera_id = ?",
+            (camera_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    try:
+        payload = json.loads(row["calibration_json"])
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _serialize(row: sqlite3.Row) -> dict[str, Any]:
     detected = str(row["time"]).replace(" ", "T")
     if not detected.endswith("Z") and "+" not in detected:
         detected += "Z"
+    speed_available = row["speed"] is not None
     return {
         "id": row["id"],
         "trackingId": row["tracking_id"] if row["tracking_id"] is not None else row["id"],
         "vehicleType": row["vehicle_type"] or "unknown",
         "plate": None if not row["plate"] or row["plate"] == "UNKNOWN" else row["plate"],
-        "speed": float(row["speed"] or 0),
+        "plateConfidence": (
+            round(float(row["plate_confidence"]), 3)
+            if row["plate_confidence"] is not None else None
+        ),
+        "plateStatus": row["plate_status"] or "NOT_DETECTED",
+        "plateSnapshotUrl": (
+            f"/api/vehicles/{row['id']}/plate-image" if row["plate_image_path"] else None
+        ),
+        "speed": float(row["speed"]) if speed_available else 0.0,
+        "speedAvailable": speed_available,
         "speedLimit": SPEED_LIMIT,
         "status": row["status"],
         "detectedAt": detected,
@@ -185,6 +430,7 @@ def list_vehicles(
     sort: str = "time_desc",
     speed_filter: str = "",
     date_filter: str = "",
+    violation_filter: str = "",
 ) -> dict[str, Any]:
     clauses: list[str] = []
     values: list[Any] = []
@@ -204,6 +450,12 @@ def list_vehicles(
     elif speed_filter == "under_limit":
         clauses.append("speed <= ?")
         values.append(SPEED_LIMIT)
+    if violation_filter:
+        clauses.append(
+            "EXISTS (SELECT 1 FROM violations WHERE violations.vehicle_id = vehicles.id "
+            "AND violations.violation_type = ?)"
+        )
+        values.append(violation_filter)
     if date_filter:
         now = datetime.now(timezone.utc)
         start = now - (timedelta(days=7) if date_filter == "week" else timedelta(days=1))
@@ -222,24 +474,85 @@ def list_vehicles(
             f"SELECT * FROM vehicles {where} ORDER BY {order} LIMIT ? OFFSET ?",
             [*values, page_size, offset],
         ).fetchall()
-    return {"items": [_serialize(row) for row in rows], "total": total, "page": page, "pageSize": page_size}
+    items = [_serialize(row) for row in rows]
+    _attach_vehicle_violations(items)
+    return {"items": items, "total": total, "page": page, "pageSize": page_size}
 
 
 def get_vehicle(vehicle_id: int) -> dict[str, Any] | None:
     with _connect() as connection:
         row = connection.execute("SELECT * FROM vehicles WHERE id = ?", (vehicle_id,)).fetchone()
-    return _serialize(row) if row else None
+    if row is None:
+        return None
+    item = _serialize(row)
+    _attach_vehicle_violations([item])
+    return item
 
 
-def dashboard_summary(current_fps: float = 0) -> dict[str, Any]:
+def list_plate_reads(limit: int = 20) -> list[dict[str, Any]]:
     with _connect() as connection:
-        row = connection.execute("""
+        rows = connection.execute(
+            """SELECT * FROM vehicles
+               WHERE plate IS NOT NULL AND plate != '' AND plate != 'UNKNOWN'
+                 AND plate_status = 'CONFIRMED'
+               ORDER BY time DESC, id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    items = [_serialize(row) for row in rows]
+    _attach_vehicle_violations(items)
+    return items
+
+
+def plate_reads_total() -> int:
+    with _connect() as connection:
+        row = connection.execute(
+            """SELECT COUNT(*) AS total FROM vehicles
+               WHERE plate IS NOT NULL AND plate != '' AND plate != 'UNKNOWN'
+                 AND plate_status = 'CONFIRMED'"""
+        ).fetchone()
+    return int(row["total"])
+
+
+def get_vehicle_plate_image_path(vehicle_id: int) -> str | None:
+    with _connect() as connection:
+        row = connection.execute(
+            "SELECT plate_image_path FROM vehicles WHERE id = ?", (vehicle_id,)
+        ).fetchone()
+    return row["plate_image_path"] if row else None
+
+
+def _attach_vehicle_violations(items: list[dict[str, Any]]) -> None:
+    vehicle_ids = [int(item["id"]) for item in items]
+    if not vehicle_ids:
+        return
+    placeholders = ",".join("?" for _ in vehicle_ids)
+    with _connect() as connection:
+        rows = connection.execute(
+            f"""SELECT vehicle_id, violation_type FROM violations
+                WHERE vehicle_id IN ({placeholders}) ORDER BY detected_at""",
+            vehicle_ids,
+        ).fetchall()
+    by_vehicle: dict[int, list[str]] = {vehicle_id: [] for vehicle_id in vehicle_ids}
+    for row in rows:
+        values = by_vehicle[int(row["vehicle_id"])]
+        if row["violation_type"] not in values:
+            values.append(row["violation_type"])
+    for item in items:
+        item["violations"] = by_vehicle[int(item["id"])]
+
+
+def dashboard_summary(current_fps: float = 0, since: str | None = None) -> dict[str, Any]:
+    where = "WHERE time >= datetime(?)" if since else ""
+    parameters = (since,) if since else ()
+    with _connect() as connection:
+        row = connection.execute(f"""
             SELECT COUNT(*) total,
                    SUM(CASE WHEN status = 'OVERSPEED' THEN 1 ELSE 0 END) overspeed,
                    COALESCE(AVG(speed), 0) average_speed,
                    COALESCE(MAX(speed), 0) max_speed
             FROM vehicles
-        """).fetchone()
+            {where}
+        """, parameters).fetchone()
     return {
         "totalVehicles": row["total"], "overspeedVehicles": row["overspeed"] or 0,
         "averageSpeed": round(row["average_speed"], 2), "maxSpeed": round(row["max_speed"], 2),
@@ -263,7 +576,7 @@ def analytics(range_name: str) -> dict[str, Any]:
     by_type: dict[str, int] = {}
     for item in serialized:
         by_type[item["vehicleType"]] = by_type.get(item["vehicleType"], 0) + 1
-    speeds = [item["speed"] for item in serialized]
+    speeds = [item["speed"] for item in serialized if item["speedAvailable"]]
     return {
         "timeline": list(buckets.values()),
         "byType": [{"name": key, "value": value} for key, value in by_type.items()],
