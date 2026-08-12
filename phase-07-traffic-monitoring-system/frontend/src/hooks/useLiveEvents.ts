@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { config } from "../lib/config";
 import { nextMockDetection } from "../mocks/data";
-import type { ConnectionStatus, LiveEvent, VehicleDetection, ViolationEvent } from "../types";
+import type { AlertRecord, ConnectionStatus, LiveEvent, VehicleDetection, ViolationEvent } from "../types";
 
 const isDetection = (value: unknown): value is VehicleDetection => {
   if (!value || typeof value !== "object") return false;
@@ -18,11 +18,20 @@ const isViolation = (value: unknown): value is ViolationEvent => {
     ["OVERSPEED", "NO_HELMET", "WRONG_LANE", "WRONG_DIRECTION"].includes(String(item.type));
 };
 
+const isAlert = (value: unknown): value is AlertRecord => {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<AlertRecord>;
+  return typeof item.id === "number" && typeof item.trackingId === "number" &&
+    ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(String(item.severity)) &&
+    ["NEW", "ACKNOWLEDGED", "INVESTIGATING", "RESOLVED", "FALSE_POSITIVE"].includes(String(item.status));
+};
+
 export function useLiveEvents() {
   const client = useQueryClient();
   const [connection, setConnection] = useState<ConnectionStatus>(config.useMocks ? "connected" : "reconnecting");
   const [latest, setLatest] = useState<VehicleDetection | null>(null);
   const [latestViolation, setLatestViolation] = useState<ViolationEvent | null>(null);
+  const [latestAlert, setLatestAlert] = useState<AlertRecord | null>(null);
   const [fps, setFps] = useState(27.4);
   const [analysisFps, setAnalysisFps] = useState(config.useMocks ? 15 : 0);
   const [activeTracks, setActiveTracks] = useState(0);
@@ -76,6 +85,12 @@ export function useLiveEvents() {
             client.invalidateQueries({ queryKey: ["violation-summary"] });
             client.invalidateQueries({ queryKey: ["vehicles"] });
           }
+          if (event.type === "alert_event" && isAlert(event.data)) {
+            setLatestAlert(event.data);
+            client.invalidateQueries({ queryKey: ["alerts"] });
+            client.invalidateQueries({ queryKey: ["alert-summary"] });
+            window.dispatchEvent(new CustomEvent("trafficops:new-alert", { detail: event.data }));
+          }
           if (event.type === "system_status" && typeof event.data?.fps === "number") {
             setFps(event.data.fps);
             if (typeof event.data.analysisFps === "number") setAnalysisFps(event.data.analysisFps);
@@ -108,5 +123,5 @@ export function useLiveEvents() {
     };
   }, [client]);
 
-  return { connection, latest, latestViolation, fps, analysisFps, activeTracks, activeDetections };
+  return { connection, latest, latestViolation, latestAlert, fps, analysisFps, activeTracks, activeDetections };
 }

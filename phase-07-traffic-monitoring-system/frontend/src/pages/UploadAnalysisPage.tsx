@@ -63,6 +63,7 @@ function validateVideo(file: File) {
 
 export function UploadAnalysisPage() {
   const input = useRef<HTMLInputElement>(null);
+  const resultSection = useRef<HTMLDivElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -96,6 +97,14 @@ export function UploadAnalysisPage() {
   const job = jobQuery.data ?? startAnalysis.data;
   const active = startAnalysis.isPending || job?.status === "queued" || job?.status === "processing";
   const calibration = options.calibration ?? DEFAULT_CALIBRATION;
+
+  useEffect(() => {
+    if (job?.status !== "completed" || !job.result) return;
+    const frame = window.requestAnimationFrame(() => {
+      resultSection.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [job?.result, job?.status]);
 
   const chooseFile = (next: File | null) => {
     if (!next) return;
@@ -300,7 +309,7 @@ export function UploadAnalysisPage() {
           {failure && <div role="alert" className="rounded-2xl border border-danger/30 bg-danger/10 p-4 text-xs text-danger"><strong>Analysis could not finish</strong><p className="mt-1 leading-5">{failure}</p><button type="button" onClick={() => { setJobId(null); startAnalysis.reset(); }} className="secondary-button mt-3 border-danger/25 text-danger"><RotateCcw size={14} />Try again</button></div>}
         </aside>
       </form>
-      {job?.status === "completed" && job.result && <AnalysisResults result={job.result} />}
+      {job?.status === "completed" && job.result && <div ref={resultSection} className="scroll-mt-24"><AnalysisResults result={job.result} /></div>}
     </div>
   );
 }

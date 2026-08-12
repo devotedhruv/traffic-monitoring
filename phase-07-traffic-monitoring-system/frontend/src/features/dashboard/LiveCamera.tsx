@@ -3,12 +3,18 @@ import { Camera, Expand, Eye, EyeOff, Grid2X2, Monitor, Radio, SlidersHorizontal
 import { config } from "../../lib/config";
 import { cx } from "../../lib/format";
 import { api } from "../../services/api";
-import type { ConnectionStatus } from "../../types";
+import type { ConnectionStatus, LiveOverlayFilter } from "../../types";
 import { WebcamConnector } from "./WebcamConnector";
 
 const categories = [
-  { name: "All", color: "bg-success" }, { name: "Vehicle", color: "bg-info" },
-  { name: "Person", color: "bg-purple" }, { name: "Bicycle", color: "bg-warning" }, { name: "Violation", color: "bg-danger" }
+  { key: "all", name: "All", color: "bg-success" },
+  { key: "car", name: "Car", color: "bg-info" },
+  { key: "bike", name: "Bike", color: "bg-warning" },
+  { key: "person", name: "Person", color: "bg-purple" },
+  { key: "violation", name: "Violation", color: "bg-danger" },
+  { key: "no_helmet", name: "No helmet", color: "bg-warning" },
+  { key: "wrong_lane", name: "Wrong lane", color: "bg-purple" },
+  { key: "overspeed", name: "Overspeed", color: "bg-danger" }
 ] as const;
 
 export function LiveCamera({ cameraId, cameraName, connection, fps, analysisFps, activeTracks, activeDetections, streamVersion = 0, onSourceChanged }: { cameraId: string; cameraName: string; connection: ConnectionStatus; fps: number; analysisFps: number; activeTracks: number; activeDetections: number; streamVersion?: number; onSourceChanged?: () => void }) {
@@ -17,11 +23,12 @@ export function LiveCamera({ cameraId, cameraName, connection, fps, analysisFps,
   const [loaded, setLoaded] = useState(false);
   const [grid, setGrid] = useState(false);
   const [contain, setContain] = useState(false);
-  const [category, setCategory] = useState<(typeof categories)[number]["name"]>("All");
+  const [overlayFilters, setOverlayFilters] = useState<LiveOverlayFilter[]>(["all"]);
   const [confidence, setConfidence] = useState(10);
   const [showOverlays, setShowOverlays] = useState(true);
   const [message, setMessage] = useState("");
   const [applying, setApplying] = useState(false);
+  const [filtering, setFiltering] = useState(false);
   const [togglingOverlays, setTogglingOverlays] = useState(false);
   const canStream = !config.useMocks && connection !== "offline";
   const fullscreen = () => container.current?.requestFullscreen?.();
@@ -32,6 +39,7 @@ export function LiveCamera({ cameraId, cameraName, connection, fps, analysisFps,
       if (!active) return;
       setConfidence(Math.round(settings.confidence * 100));
       setShowOverlays(settings.showOverlays);
+      setOverlayFilters(settings.overlayFilters?.length ? settings.overlayFilters : ["all"]);
     }).catch(() => undefined);
     return () => { active = false; };
   }, [cameraId]);
@@ -60,6 +68,37 @@ export function LiveCamera({ cameraId, cameraName, connection, fps, analysisFps,
       setMessage(reason instanceof Error ? reason.message : "Video overlay setting could not be updated.");
     } finally {
       setTogglingOverlays(false);
+    }
+  };
+  const selectOverlayFilter = async (filter: LiveOverlayFilter) => {
+    const previous = overlayFilters;
+    const next: LiveOverlayFilter[] = filter === "all"
+      ? ["all"]
+      : previous.includes("all")
+        ? [filter]
+        : previous.includes(filter)
+          ? (previous.filter((value) => value !== filter).length
+            ? previous.filter((value) => value !== filter)
+            : ["all"])
+          : [...previous, filter];
+    setOverlayFilters(next);
+    setFiltering(true);
+    try {
+      const updated = await api.updateCameraSettings(cameraId, {
+        overlayFilters: next,
+        ...(showOverlays ? {} : { showOverlays: true })
+      });
+      setOverlayFilters(updated.overlayFilters?.length ? updated.overlayFilters : ["all"]);
+      setShowOverlays(updated.showOverlays);
+      const labels = next.includes("all")
+        ? "all detections"
+        : categories.filter((item) => next.includes(item.key)).map((item) => item.name).join(", ");
+      setMessage(`Live overlay filtered to ${labels}. AI monitoring remains active for every class.`);
+    } catch (reason) {
+      setOverlayFilters(previous);
+      setMessage(reason instanceof Error ? reason.message : "Live detection filter could not be updated.");
+    } finally {
+      setFiltering(false);
     }
   };
   const screenshot = () => {
@@ -91,7 +130,10 @@ export function LiveCamera({ cameraId, cameraName, connection, fps, analysisFps,
         <button type="button" className={cx("detection-control", contain && "detection-control-active")} onClick={() => setContain((value) => !value)} aria-pressed={contain} title="Camera fit"><Monitor size={16} /></button>
         <button type="button" className={cx("detection-control", !showOverlays && "detection-control-active")} onClick={toggleOverlays} disabled={togglingOverlays} aria-pressed={!showOverlays} aria-label={showOverlays ? "Hide vehicle IDs and boxes" : "Show vehicle IDs and boxes"} title={showOverlays ? "Clean view: hide vehicle IDs and boxes" : "Show vehicle IDs and boxes"}>{showOverlays ? <Eye size={16} /> : <EyeOff size={16} />}</button>
         <span className="mx-1 hidden h-6 w-px bg-border sm:block" />
-        {categories.map((item) => <button type="button" key={item.name} onClick={() => setCategory(item.name)} aria-pressed={category === item.name} className={cx("detection-pill", category === item.name && "detection-pill-active")}><span className={cx("h-2 w-2 rounded-full", item.color)} />{item.name}</button>)}
+        {categories.map((item) => {
+          const selected = overlayFilters.includes(item.key);
+          return <button type="button" key={item.key} onClick={() => selectOverlayFilter(item.key)} disabled={filtering} aria-pressed={selected} aria-label={`Filter live detections by ${item.name}`} className={cx("detection-pill", selected && "detection-pill-active")}><span className={cx("h-2 w-2 rounded-full", item.color)} />{item.name}</button>;
+        })}
         <label className="ml-auto flex min-w-[185px] items-center gap-2 text-[10px] text-muted"><span>Confidence</span><output className="rounded-lg border border-border px-2 py-1 tabular-nums text-ink">{(confidence / 100).toFixed(2)}</output><input type="range" min="10" max="90" step="5" value={confidence} onChange={(event) => setConfidence(Number(event.target.value))} className="min-w-0 flex-1 accent-primary" aria-label="Detection confidence threshold" /></label>
         <button type="button" className="detection-control" onClick={applySettings} disabled={applying} aria-label="Apply detection settings" title="Apply AI confidence"><SlidersHorizontal size={16} /></button>
       </div>

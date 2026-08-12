@@ -1,6 +1,6 @@
 import { config, endpoints } from "../lib/config";
 import { getMockAnalytics, getMockSummary, getMockVehicles, mockVehicles } from "../mocks/data";
-import type { AnalyticsData, AnalyticsRange, AuthResponse, Camera, CameraSettings, DashboardSummary, LaneRule, LiveCameraCalibration, PaginatedVehicles, VehicleDetection, VehicleQuery, VideoAnalysisJob, VideoAnalysisOptions, ViolationCapabilities, ViolationEvent, ViolationType } from "../types";
+import type { AlertDetail, AlertQuery, AlertSummary, AnalyticsData, AnalyticsRange, AuthResponse, AuthUser, Camera, CameraSettings, DashboardSummary, LaneRule, LiveCameraCalibration, PaginatedAlerts, PaginatedVehicles, PaginatedViolations, ReportFilters, ReportFrequency, ReportQuery, ReportRecord, ReportSchedule, ReportSummary, ReportTemplate, ReportType, VehicleDetection, VehicleQuery, VideoAnalysisJob, VideoAnalysisOptions, ViolationCapabilities, ViolationQuery, ViolationSummary, ViolationType } from "../types";
 
 export class ApiError extends Error {
   status: number;
@@ -43,6 +43,48 @@ function queryString(query: VehicleQuery) {
     sort: query.sort ?? "time_desc"
   });
   return params.toString();
+}
+
+function violationQueryString(query: ViolationQuery) {
+  return new URLSearchParams({
+    page: String(query.page),
+    pageSize: String(query.pageSize),
+    type: query.type ?? "",
+    vehicleType: query.vehicleType ?? "",
+    search: query.search ?? "",
+    date: query.date ?? "",
+    camera: query.camera ?? "",
+    sort: query.sort ?? "time_desc"
+  }).toString();
+}
+
+function alertQueryString(query: AlertQuery) {
+  return new URLSearchParams({
+    page: String(query.page),
+    pageSize: String(query.pageSize),
+    status: query.status ?? "",
+    severity: query.severity ?? "",
+    type: query.type ?? "",
+    vehicleType: query.vehicleType ?? "",
+    camera: query.camera ?? "",
+    assignedTo: query.assignedTo ?? "",
+    search: query.search ?? "",
+    date: query.date ?? "",
+    sort: query.sort ?? "newest"
+  }).toString();
+}
+
+function reportQueryString(query: ReportQuery) {
+  return new URLSearchParams({
+    page: String(query.page),
+    pageSize: String(query.pageSize),
+    search: query.search ?? "",
+    type: query.type ?? "",
+    status: query.status ?? "",
+    creator: query.creator ? String(query.creator) : "",
+    date: query.date ?? "",
+    sort: query.sort ?? "newest"
+  }).toString();
 }
 
 async function startVideoAnalysis(file: File, options: VideoAnalysisOptions) {
@@ -101,13 +143,65 @@ export const api = {
     wrongDirectionDetection: { available: false, reason: "A global allowed direction is not configured" }
   }) : request<ViolationCapabilities>(endpoints.capabilities),
   getViolations: (limit = 50, type: ViolationType | "" = "") =>
-    config.useMocks ? Promise.resolve({ items: [], total: 0 }) :
-      request<{ items: ViolationEvent[]; total: number }>(`${endpoints.violations}?limit=${limit}&type=${type}`),
+    config.useMocks ? Promise.resolve({ items: [], total: 0, page: 1, pageSize: limit }) :
+      request<PaginatedViolations>(`${endpoints.violations}?limit=${limit}&type=${type}`),
+  getViolationRecords: (query: ViolationQuery) => config.useMocks
+    ? Promise.resolve<PaginatedViolations>({ items: [], total: 0, page: query.page, pageSize: query.pageSize })
+    : request<PaginatedViolations>(`${endpoints.violations}?${violationQueryString(query)}`),
   getPlates: (limit = 20) => config.useMocks
     ? Promise.resolve({ items: [] as VehicleDetection[], total: 0 })
     : request<{ items: VehicleDetection[]; total: number }>(`${endpoints.plates}?limit=${limit}`),
-  getViolationSummary: () => config.useMocks ? Promise.resolve({ total: 0, counts: {}, latest: null }) :
-    request<{ total: number; counts: Partial<Record<ViolationType, number>>; latest: ViolationEvent | null }>(endpoints.violationsSummary),
+  getViolationSummary: (scope: "session" | "all" = "session") => config.useMocks ? Promise.resolve<ViolationSummary>({ total: 0, counts: {}, latest: null }) :
+    request<ViolationSummary>(`${endpoints.violationsSummary}?scope=${scope}`),
+  getAlerts: (query: AlertQuery) => config.useMocks
+    ? Promise.resolve<PaginatedAlerts>({ items: [], total: 0, page: query.page, pageSize: query.pageSize })
+    : request<PaginatedAlerts>(`${endpoints.alerts}?${alertQueryString(query)}`),
+  getAlertSummary: (scope: "session" | "today" | "all" = "session") => config.useMocks
+    ? Promise.resolve<AlertSummary>({ total: 0, new: 0, unresolved: 0, critical: 0, resolvedToday: 0, averageResponseSeconds: null, bySeverity: {} })
+    : request<AlertSummary>(`${endpoints.alertsSummary}?scope=${scope}`),
+  getAlert: (alertId: number) => request<AlertDetail>(endpoints.alert(alertId)),
+  getAlertOperators: () => request<{ items: AuthUser[] }>(endpoints.alertOperators),
+  updateAlertStatus: (alertId: number, action: "acknowledge" | "investigate" | "resolve" | "false-positive", expectedVersion: number, note?: string) => request<AlertDetail>(endpoints.alertAction(alertId, action), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expectedVersion, note })
+  }),
+  assignAlert: (alertId: number, userId: number | null, expectedVersion: number) => request<AlertDetail>(endpoints.alertAction(alertId, "assign"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId, expectedVersion })
+  }),
+  getReportTemplates: () => config.useMocks
+    ? Promise.resolve<{ items: ReportTemplate[] }>({ items: [] })
+    : request<{ items: ReportTemplate[] }>(endpoints.reportTemplates),
+  getReports: (query: ReportQuery) => config.useMocks
+    ? Promise.resolve({ items: [] as ReportRecord[], total: 0, page: query.page, pageSize: query.pageSize })
+    : request<{ items: ReportRecord[]; total: number; page: number; pageSize: number }>(`${endpoints.reports}?${reportQueryString(query)}`),
+  getReportSummary: () => config.useMocks
+    ? Promise.resolve<ReportSummary>({ total: 0, ready: 0, failed: 0, scheduled: 0, thisMonth: 0 })
+    : request<ReportSummary>(endpoints.reportsSummary),
+  getReport: (reportId: number) => request<ReportRecord>(endpoints.report(reportId)),
+  generateReport: (payload: { name: string; type: ReportType; filters: ReportFilters; sections: string[] }) => request<ReportRecord>(endpoints.generateReport, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }),
+  renameReport: (reportId: number, name: string) => request<ReportRecord>(endpoints.reportAction(reportId, "rename"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name })
+  }),
+  regenerateReport: (reportId: number) => request<ReportRecord>(endpoints.reportAction(reportId, "regenerate"), { method: "POST" }),
+  getReportSchedules: () => config.useMocks
+    ? Promise.resolve<{ items: ReportSchedule[] }>({ items: [] })
+    : request<{ items: ReportSchedule[] }>(endpoints.reportSchedules),
+  createReportSchedule: (payload: { name: string; type: ReportType; frequency: ReportFrequency; generationTime: string; timezone: string; filters: Omit<ReportFilters, "startAt" | "endAt" | "timezone">; sections: string[] }) => request<ReportSchedule>(endpoints.reportSchedules, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }),
+  toggleReportSchedule: (scheduleId: number) => request<ReportSchedule>(endpoints.reportScheduleToggle(scheduleId), { method: "POST" }),
+  getReportDownloadUrl: (reportId: number, format: "pdf" | "csv") => `${config.apiBaseUrl}${endpoints.reportDownload(reportId, format)}`,
   getCameraSettings: (cameraId: string) => request<CameraSettings>(endpoints.cameraSettings(cameraId)),
   updateCameraSettings: (cameraId: string, settings: Partial<CameraSettings>) => request<CameraSettings>(endpoints.cameraSettings(cameraId), {
     method: "POST",

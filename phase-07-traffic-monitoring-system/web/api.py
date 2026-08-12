@@ -4,7 +4,7 @@ import asyncio
 import math
 import os
 import struct
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Literal
@@ -20,15 +20,27 @@ from config.settings import (
     ALLOWED_ORIGINS, AUTH_COOKIE_NAME, CAMERA_ID, PROJECT_ROOT,
 )
 from src.database import (
-    analytics, create_database, dashboard_summary, get_vehicle,
-    get_vehicle_plate_image_path, get_violation_evidence_path, list_plate_reads,
-    list_vehicles, list_violations, plate_reads_total, save_camera_calibration,
-    save_camera_lane_rules, violation_summary,
+    alert_summary, analytics, assign_alert, create_database, dashboard_summary,
+    get_alert, get_vehicle, get_vehicle_plate_image_path, get_violation_evidence_path,
+    list_operators, list_plate_reads, list_vehicles, plate_reads_total, query_alerts,
+    query_violations, save_camera_calibration, save_camera_lane_rules,
+    update_alert_status, violation_summary,
 )
 from web.runtime import LiveRoadProfile, broker, next_event, runtime
 from web.violations import parse_lane_rules
 from web.auth import current_user_from_token, require_user, router as auth_router
 from web.video_analysis import router as video_analysis_router
+from web.reports import process_due_reports, router as reports_router
+
+
+async def report_scheduler_loop():
+    while True:
+        await asyncio.sleep(60)
+        try:
+            await asyncio.to_thread(process_due_reports)
+        except Exception:
+            # A failed scheduled run is persisted; the API and live pipeline remain available.
+            continue
 
 
 @asynccontextmanager
@@ -38,7 +50,11 @@ async def lifespan(_: FastAPI):
     runtime.load_road_profile()
     if os.getenv("TRAFFIC_AUTOSTART", "true").lower() == "true":
         runtime.start()
+    report_scheduler = asyncio.create_task(report_scheduler_loop())
     yield
+    report_scheduler.cancel()
+    with suppress(asyncio.CancelledError):
+        await report_scheduler
     runtime.stop()
 
 
@@ -57,11 +73,16 @@ app.add_middleware(
 )
 app.include_router(auth_router)
 app.include_router(video_analysis_router, dependencies=[Depends(require_user)])
+app.include_router(reports_router)
 
 
 class CameraSettingsRequest(BaseModel):
     confidence: float | None = Field(default=None, ge=0.05, le=0.9)
     showOverlays: bool | None = None
+    overlayFilters: list[Literal[
+        "all", "car", "bike", "person", "violation",
+        "no_helmet", "wrong_lane", "overspeed",
+    ]] | None = None
 
 
 class LaneRuleRequest(BaseModel):
@@ -96,6 +117,16 @@ class CameraCalibrationRequest(BaseModel):
     roadLengthMeters: float = Field(ge=5, le=1000)
     laneCount: int = Field(ge=1, le=8)
     quality: float = Field(default=0.8, ge=0.1, le=1)
+
+
+class AlertActionRequest(BaseModel):
+    note: str | None = Field(default=None, max_length=500)
+    expectedVersion: int = Field(ge=1)
+
+
+class AlertAssignmentRequest(BaseModel):
+    userId: int | None = Field(default=None, ge=1)
+    expectedVersion: int = Field(ge=1)
 
 
 @app.get("/api/health")
@@ -242,9 +273,12 @@ def camera_settings(camera_id: str, payload: CameraSettingsRequest):
         runtime.set_confidence(payload.confidence)
     if payload.showOverlays is not None:
         runtime.set_overlays_visible(payload.showOverlays)
+    if payload.overlayFilters is not None:
+        runtime.set_overlay_filters(payload.overlayFilters)
     return {
         "confidence": runtime.confidence_threshold,
         "showOverlays": runtime.show_overlays,
+        "overlayFilters": sorted(runtime.overlay_filters),
     }
 
 
@@ -255,6 +289,7 @@ def get_camera_settings(camera_id: str):
     return {
         "confidence": runtime.confidence_threshold,
         "showOverlays": runtime.show_overlays,
+        "overlayFilters": sorted(runtime.overlay_filters),
     }
 
 
@@ -265,17 +300,31 @@ def capabilities():
 
 @app.get("/api/violations", dependencies=[Depends(require_user)])
 def violations(
-    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    page: Annotated[int, Query(ge=1)] = 1,
+    pageSize: Annotated[int, Query(ge=1, le=100)] = 20,
+    limit: Annotated[int | None, Query(ge=1, le=200)] = None,
     type: Literal["", "OVERSPEED", "NO_HELMET", "WRONG_LANE", "WRONG_DIRECTION"] = "",
+    vehicleType: Literal["", "bicycle", "car", "motorcycle", "bus", "truck", "unknown"] = "",
+    search: Annotated[str, Query(max_length=100)] = "",
+    date: Literal["", "today", "week"] = "",
+    camera: Annotated[str, Query(max_length=100)] = "",
+    sort: Literal["time_desc", "time_asc", "speed_desc", "confidence_desc"] = "time_desc",
 ):
-    summary = violation_summary()
-    total = summary["counts"].get(type, 0) if type else summary["total"]
-    return {"items": list_violations(limit, type), "total": total}
+    return query_violations(
+        page=page,
+        page_size=limit or pageSize,
+        violation_type=type,
+        vehicle_type=vehicleType,
+        search=search,
+        date_filter=date,
+        camera_id=camera,
+        sort=sort,
+    )
 
 
 @app.get("/api/violations/summary", dependencies=[Depends(require_user)])
-def violations_summary():
-    return violation_summary(runtime.session_started_at)
+def violations_summary(scope: Literal["session", "all"] = "session"):
+    return violation_summary(runtime.session_started_at if scope == "session" else None)
 
 
 @app.get("/api/violations/{violation_id}/evidence", dependencies=[Depends(require_user)])
@@ -288,6 +337,123 @@ def violation_evidence(violation_id: int):
     if not resolved.is_file() or not resolved.is_relative_to(evidence_root):
         raise HTTPException(status_code=404, detail="Violation evidence not found")
     return FileResponse(resolved, media_type="image/jpeg")
+
+
+@app.get("/api/alerts")
+def alerts(
+    user: Annotated[dict, Depends(require_user)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    pageSize: Annotated[int, Query(ge=1, le=100)] = 20,
+    status: Annotated[str, Query(max_length=120)] = "",
+    severity: Literal["", "LOW", "MEDIUM", "HIGH", "CRITICAL"] = "",
+    type: Literal["", "OVERSPEED", "NO_HELMET", "WRONG_LANE", "WRONG_DIRECTION"] = "",
+    vehicleType: Literal["", "bicycle", "car", "motorcycle", "bus", "truck", "unknown"] = "",
+    camera: Annotated[str, Query(max_length=100)] = "",
+    assignedTo: Annotated[str, Query(max_length=40)] = "",
+    search: Annotated[str, Query(max_length=100)] = "",
+    date: Literal["", "today", "week"] = "",
+    sort: Literal["newest", "oldest", "severity"] = "newest",
+):
+    requested_statuses = [item.strip().upper() for item in status.split(",") if item.strip()]
+    if any(item not in {"NEW", "ACKNOWLEDGED", "INVESTIGATING", "RESOLVED", "FALSE_POSITIVE"} for item in requested_statuses):
+        raise HTTPException(status_code=422, detail="Invalid alert status filter")
+    assignment = str(user["id"]) if assignedTo == "me" else assignedTo
+    if assignment and assignment != "unassigned" and not assignment.isdigit():
+        raise HTTPException(status_code=422, detail="Invalid assignedTo filter")
+    return query_alerts(
+        page, pageSize, status, severity, type, vehicleType, camera,
+        assignment, search, date, sort,
+    )
+
+
+@app.get("/api/alerts/summary")
+def alerts_summary(
+    user: Annotated[dict, Depends(require_user)],
+    scope: Literal["session", "today", "all"] = "session",
+):
+    del user
+    since = runtime.session_started_at if scope == "session" else None
+    if scope == "today":
+        since = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0,
+        ).isoformat().replace("+00:00", "Z")
+    return alert_summary(since)
+
+
+@app.get("/api/alerts/operators")
+def alert_operators(user: Annotated[dict, Depends(require_user)]):
+    del user
+    return {"items": list_operators()}
+
+
+def _alert_result(operation):
+    try:
+        return operation()
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/api/alerts/{alert_id}")
+def alert_detail(alert_id: int, user: Annotated[dict, Depends(require_user)]):
+    del user
+    result = get_alert(alert_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return result
+
+
+@app.post("/api/alerts/{alert_id}/acknowledge")
+def acknowledge_alert(
+    alert_id: int, payload: AlertActionRequest,
+    user: Annotated[dict, Depends(require_user)],
+):
+    return _alert_result(lambda: update_alert_status(
+        alert_id, "ACKNOWLEDGED", user, payload.note, payload.expectedVersion,
+    ))
+
+
+@app.post("/api/alerts/{alert_id}/investigate")
+def investigate_alert(
+    alert_id: int, payload: AlertActionRequest,
+    user: Annotated[dict, Depends(require_user)],
+):
+    return _alert_result(lambda: update_alert_status(
+        alert_id, "INVESTIGATING", user, payload.note, payload.expectedVersion,
+    ))
+
+
+@app.post("/api/alerts/{alert_id}/resolve")
+def resolve_alert(
+    alert_id: int, payload: AlertActionRequest,
+    user: Annotated[dict, Depends(require_user)],
+):
+    return _alert_result(lambda: update_alert_status(
+        alert_id, "RESOLVED", user, payload.note, payload.expectedVersion,
+    ))
+
+
+@app.post("/api/alerts/{alert_id}/false-positive")
+def false_positive_alert(
+    alert_id: int, payload: AlertActionRequest,
+    user: Annotated[dict, Depends(require_user)],
+):
+    return _alert_result(lambda: update_alert_status(
+        alert_id, "FALSE_POSITIVE", user, payload.note, payload.expectedVersion,
+    ))
+
+
+@app.post("/api/alerts/{alert_id}/assign")
+def assign_alert_operator(
+    alert_id: int, payload: AlertAssignmentRequest,
+    user: Annotated[dict, Depends(require_user)],
+):
+    return _alert_result(lambda: assign_alert(
+        alert_id, payload.userId, user, payload.expectedVersion,
+    ))
 
 
 @app.get("/api/cameras/{camera_id}/lanes", dependencies=[Depends(require_user)])

@@ -191,6 +191,129 @@ class TrafficApiTests(unittest.TestCase):
         self.assertEqual(filtered["total"], 1)
         self.assertIn("NO_HELMET", filtered["items"][0]["violations"])
 
+    def test_violation_records_are_paginated_filtered_and_joined_to_vehicle_details(self):
+        car = database.list_vehicles(vehicle_type="car")["items"][0]
+        motorcycle = database.list_vehicles(vehicle_type="motorcycle")["items"][0]
+        database.update_vehicle_plate(car["id"], "BA 12 PA 1234", 0.93, "CONFIRMED")
+        database.save_violation(
+            car["id"], 42, "OVERSPEED", 0.91, "camera-01", "car",
+            "record-search", evidence_path="/tmp/overspeed.jpg",
+            detected_at="2025-01-02T10:00:00Z", speed=71.2, speed_limit=50,
+        )
+        database.save_violation(
+            motorcycle["id"], 43, "NO_HELMET", 0.84, "camera-01", "motorcycle",
+            "record-old", detected_at="2025-01-01T10:00:00Z",
+        )
+
+        plate = api.violations(search="12 PA", sort="speed_desc")
+        typed = api.violations(type="NO_HELMET", vehicleType="motorcycle")
+        recent = api.violations(date="today")
+
+        self.assertEqual(plate["total"], 1)
+        self.assertEqual(plate["items"][0]["vehicleId"], car["id"])
+        self.assertEqual(plate["items"][0]["plate"], "BA 12 PA 1234")
+        self.assertEqual(plate["items"][0]["speed"], 71.2)
+        self.assertEqual(plate["items"][0]["speedLimit"], 50.0)
+        self.assertEqual(plate["items"][0]["cameraName"], "North Junction")
+        self.assertEqual(
+            plate["items"][0]["snapshotUrl"],
+            f"/api/violations/{plate['items'][0]['id']}/evidence",
+        )
+        self.assertEqual(typed["total"], 1)
+        self.assertEqual(typed["items"][0]["trackingId"], 43)
+        self.assertEqual(recent["total"], 0)
+        self.assertEqual(api.violations_summary(scope="all")["total"], 2)
+
+    def test_violation_records_support_vehicle_id_search_and_pagination(self):
+        vehicle = database.list_vehicles(vehicle_type="car")["items"][0]
+        for index, violation_type in enumerate(("OVERSPEED", "WRONG_LANE")):
+            database.save_violation(
+                vehicle["id"], 100 + index, violation_type, 0.8 + index * 0.1,
+                "camera-01", "car", f"page-{index}",
+            )
+
+        result = api.violations(page=1, pageSize=1, search=str(vehicle["id"]))
+
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(result["page"], 1)
+        self.assertEqual(result["pageSize"], 1)
+        self.assertEqual(len(result["items"]), 1)
+
+    def test_confirmed_violations_create_idempotent_grouped_alerts_with_escalation(self):
+        vehicle = database.list_vehicles(vehicle_type="car")["items"][0]
+        first = database.save_violation(
+            vehicle["id"], 901, "OVERSPEED", 0.82, "camera-01", "car",
+            "alert-session-one", detected_at="2026-08-13T05:00:00Z",
+            speed=58, speed_limit=50,
+        )
+        second = database.save_violation(
+            vehicle["id"], 901, "OVERSPEED", 0.95, "camera-01", "car",
+            "alert-session-two", detected_at="2026-08-13T05:00:10Z",
+            speed=82, speed_limit=50,
+        )
+        duplicate = database.save_violation(
+            vehicle["id"], 901, "OVERSPEED", 0.99, "camera-01", "car",
+            "alert-session-two", detected_at="2026-08-13T05:00:11Z",
+            speed=90, speed_limit=50,
+        )
+
+        queue = database.query_alerts()
+        first_alert = database.get_alert_for_violation(first["id"])
+        second_alert = database.get_alert_for_violation(second["id"])
+
+        self.assertIsNone(duplicate)
+        self.assertEqual(queue["total"], 1)
+        self.assertEqual(queue["items"][0]["occurrenceCount"], 2)
+        self.assertEqual(queue["items"][0]["severity"], "CRITICAL")
+        self.assertEqual(first_alert["id"], second_alert["id"])
+        self.assertEqual(len(second_alert["occurrences"]), 2)
+
+    def test_alert_workflow_assignment_audit_and_optimistic_concurrency(self):
+        operator = database.create_user(
+            "Response Operator", "response@example.com", "test-password-hash",
+        )
+        vehicle = database.list_vehicles(vehicle_type="motorcycle")["items"][0]
+        violation = database.save_violation(
+            vehicle["id"], 902, "NO_HELMET", 0.91, "camera-01", "motorcycle",
+            "workflow-session",
+        )
+        alert = database.get_alert_for_violation(violation["id"])
+
+        acknowledged = database.update_alert_status(
+            alert["id"], "ACKNOWLEDGED", operator, expected_version=1,
+        )
+        assigned = database.assign_alert(
+            alert["id"], operator["id"], operator,
+            expected_version=acknowledged["version"],
+        )
+        investigating = database.update_alert_status(
+            alert["id"], "INVESTIGATING", operator,
+            expected_version=assigned["version"],
+        )
+        with self.assertRaises(ValueError):
+            database.update_alert_status(
+                alert["id"], "RESOLVED", operator,
+                expected_version=investigating["version"],
+            )
+        with self.assertRaises(RuntimeError):
+            database.update_alert_status(
+                alert["id"], "RESOLVED", operator, "Checked camera evidence",
+                expected_version=1,
+            )
+        resolved = database.update_alert_status(
+            alert["id"], "RESOLVED", operator, "Checked camera evidence",
+            expected_version=investigating["version"],
+        )
+
+        self.assertEqual(resolved["status"], "RESOLVED")
+        self.assertEqual(resolved["assignedTo"]["id"], operator["id"])
+        self.assertEqual(resolved["resolutionNote"], "Checked camera evidence")
+        self.assertEqual(
+            [item["action"] for item in resolved["activity"][:4]],
+            ["RESOLVED", "INVESTIGATING", "ASSIGNED", "ACKNOWLEDGED"],
+        )
+        self.assertEqual(database.alert_summary()["unresolved"], 0)
+
     def test_camera_lane_rules_validate_persist_and_update_capability(self):
         payload = api.CameraLaneRulesRequest(rules=[api.LaneRuleRequest(
             laneId=1, minX=0, maxX=0.5, allowedDirection="approaching",
@@ -216,11 +339,15 @@ class TrafficApiTests(unittest.TestCase):
         self.assertEqual(cameras[0]["id"], "camera-01")
 
         updated = api.camera_settings(
-            "camera-01", api.CameraSettingsRequest(confidence=0.2, showOverlays=False)
+            "camera-01", api.CameraSettingsRequest(
+                confidence=0.2, showOverlays=False, overlayFilters=["car", "overspeed"]
+            )
         )
         self.assertEqual(updated["confidence"], 0.2)
         self.assertFalse(updated["showOverlays"])
+        self.assertEqual(updated["overlayFilters"], ["car", "overspeed"])
         self.assertFalse(api.get_camera_settings("camera-01")["showOverlays"])
+        self.assertEqual(api.get_camera_settings("camera-01")["overlayFilters"], ["car", "overspeed"])
         with self.assertRaises(HTTPException) as missing:
             api.camera_settings("missing", api.CameraSettingsRequest(confidence=0.2))
         self.assertEqual(missing.exception.status_code, 404)
@@ -243,6 +370,18 @@ class TrafficApiTests(unittest.TestCase):
         self.assertIn("/api/capabilities", paths)
         self.assertIn("/api/violations", paths)
         self.assertIn("/api/violations/summary", paths)
+        self.assertIn("/api/alerts", paths)
+        self.assertIn("/api/alerts/summary", paths)
+        self.assertIn("/api/alerts/operators", paths)
+        self.assertIn("/api/alerts/{alert_id}", paths)
+        self.assertIn("/api/alerts/{alert_id}/resolve", paths)
+        self.assertIn("/api/reports/templates", paths)
+        self.assertIn("/api/reports", paths)
+        self.assertIn("/api/reports/summary", paths)
+        self.assertIn("/api/reports/generate", paths)
+        self.assertIn("/api/reports/{report_id}", paths)
+        self.assertIn("/api/reports/{report_id}/download", paths)
+        self.assertIn("/api/report-schedules", paths)
         self.assertIn("/api/video-analysis", paths)
         self.assertNotIn("/api/video-analysis/link", paths)
         self.assertIn("/api/video-analysis/{job_id}", paths)

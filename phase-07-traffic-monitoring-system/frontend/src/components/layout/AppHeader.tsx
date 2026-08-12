@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, BarChart3, ChevronDown, Clock3, LayoutDashboard, LogOut, Menu, Radio, Sparkles } from "lucide-react";
+import { Activity, AlertTriangle, BarChart3, ChevronDown, Clock3, LayoutDashboard, LogOut, Menu, Radio, Sparkles } from "lucide-react";
 import { useAuth } from "../../app/AuthContext";
 import { useLive } from "../../app/LiveContext";
 import { navigate, usePathname } from "../../app/router";
@@ -13,6 +13,7 @@ import { ThemeToggle } from "../ui/ThemeToggle";
 const links = [
   { to: "/app", text: "Dashboard", icon: LayoutDashboard },
   { to: "/app/history", text: "History", icon: Clock3 },
+  { to: "/app/violations", text: "Violations", icon: AlertTriangle },
   { to: "/app/analytics", text: "Analytics", icon: BarChart3 },
   { to: "/app/analyze", text: "Analyze video", icon: Sparkles }
 ] as const;

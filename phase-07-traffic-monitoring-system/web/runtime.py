@@ -35,15 +35,21 @@ from services.plate_detector import PlateDetector
 from services.plate_ocr import PlateOCRService, create_ocr_engine
 from services.speed_estimator import SpeedEstimator
 from src.database import (
-    get_camera_calibration, get_camera_lane_rules, save_vehicle, save_violation,
+    get_alert_for_violation, get_camera_calibration, get_camera_lane_rules,
+    save_vehicle, save_violation,
     update_vehicle_measurement, update_vehicle_plate,
 )
 from web.violations import (
-    HelmetSpecialist, HelmetVoteTracker, LaneRule, LaneViolationTracker, parse_lane_rules,
+    HelmetSpecialist, HelmetVoteTracker, LaneRule, LaneViolationTracker,
+    parse_lane_rules, person_is_vehicle_associated,
 )
 
 log = logging.getLogger("trafficops.runtime")
 VEHICLE_CLASSES = {"bicycle", "car", "motorcycle", "bus", "truck"}
+OVERLAY_FILTERS = {
+    "all", "car", "bike", "person", "violation",
+    "no_helmet", "wrong_lane", "overspeed",
+}
 
 
 def _prepare_live_file(source: str) -> tuple[str, float]:
@@ -156,6 +162,7 @@ class FrameAnnotation:
     status: str
     violations: tuple[str, ...] = ()
     plate: str | None = None
+    vehicle_associated: bool = False
 
 
 class CalibratedSpeedTracker:
@@ -326,6 +333,7 @@ class TrafficRuntime:
         self.loop_count = 0
         self.confidence_threshold = LIVE_CONFIDENCE
         self.show_overlays = True
+        self.overlay_filters = frozenset({"all"})
         self.lane_rules: tuple[LaneRule, ...] = ()
         self._lane_rules_version = 0
         self.helmet_available = False
@@ -481,6 +489,36 @@ class TrafficRuntime:
         self.show_overlays = bool(visible)
         return self.show_overlays
 
+    def set_overlay_filters(self, filters: list[str]) -> frozenset[str]:
+        """Select which analyzed objects are drawn without changing AI processing."""
+        selected = {str(value).strip().lower() for value in filters}
+        invalid = selected - OVERLAY_FILTERS
+        if invalid:
+            raise ValueError(f"Unsupported overlay filters: {', '.join(sorted(invalid))}")
+        self.overlay_filters = frozenset({"all"} if not selected or "all" in selected else selected)
+        return self.overlay_filters
+
+    def _annotation_is_visible(self, item: FrameAnnotation) -> bool:
+        selected = self.overlay_filters
+        if "all" in selected:
+            return True
+        labels: set[str] = set()
+        if item.vehicle_type == "car":
+            labels.add("car")
+        if item.vehicle_type in {"bicycle", "motorcycle"}:
+            labels.add("bike")
+        if item.vehicle_type == "person" and not item.vehicle_associated:
+            labels.add("person")
+        if item.status == "OVERSPEED" or item.violations:
+            labels.add("violation")
+        if item.status == "OVERSPEED" or "OVERSPEED" in item.violations:
+            labels.add("overspeed")
+        if "NO_HELMET" in item.violations:
+            labels.add("no_helmet")
+        if "WRONG_LANE" in item.violations:
+            labels.add("wrong_lane")
+        return bool(labels & selected)
+
     def set_lane_rules(self, rules: tuple[LaneRule, ...]) -> tuple[LaneRule, ...]:
         self.lane_rules = tuple(rules)
         self._lane_rules_version += 1
@@ -588,6 +626,8 @@ class TrafficRuntime:
         if annotation_generation != generation or timestamp - annotation_timestamp > 1.0:
             return frame
         for item in annotations:
+            if not self._annotation_is_visible(item):
+                continue
             source_x1, source_y1, source_x2, source_y2 = item.box
             x1, x2 = round(source_x1 * scale_x), round(source_x2 * scale_x)
             y1, y2 = round(source_y1 * scale_y), round(source_y2 * scale_y)
@@ -651,6 +691,7 @@ class TrafficRuntime:
         source_generation: int,
         direction: str | None,
         lane_id: int | None,
+        speed: float | None = None,
     ) -> dict[str, Any] | None:
         session_key = self.session_started_at or "runtime"
         safe_session = "".join(
@@ -684,11 +725,16 @@ class TrafficRuntime:
             lane_id=lane_id,
             direction=direction,
             evidence_path=stored_path,
+            speed=speed,
+            speed_limit=SPEED_LIMIT,
         )
         if event is None:
             return None
         event["cameraName"] = self.camera_name
         self._publish({"type": "violation_event", "data": event})
+        alert = get_alert_for_violation(event["id"])
+        if alert is not None:
+            self._publish({"type": "alert_event", "data": alert})
         return event
 
     def _analysis_loop(
@@ -810,6 +856,14 @@ class TrafficRuntime:
                     for class_raw, box_raw in zip(boxes.cls.tolist(), boxes.xyxy.tolist())
                     if str(model.names[int(class_raw)]) == "person"
                 ]
+                vehicle_boxes = [
+                    (
+                        str(model.names[int(class_raw)]),
+                        tuple(int(value) for value in box_raw),
+                    )
+                    for class_raw, box_raw in zip(boxes.cls.tolist(), boxes.xyxy.tolist())
+                    if str(model.names[int(class_raw)]) in VEHICLE_CLASSES
+                ]
                 if perspective_speed_tracker is not None and lane_rules_version != self._lane_rules_version:
                     lane_tracker = LaneViolationTracker(
                         self.lane_rules,
@@ -826,9 +880,18 @@ class TrafficRuntime:
                 )):
                     track_id = tracked_by_detection.get(detection_index)
                     vehicle_type = str(model.names[int(class_raw)])
+                    x1, y1, x2, y2 = (int(value) for value in box_raw)
+                    if vehicle_type == "person":
+                        person_box = (x1, y1, x2, y2)
+                        annotations.append(FrameAnnotation(
+                            track_id, vehicle_type, float(confidence), person_box,
+                            0.0, "NORMAL", vehicle_associated=(
+                                person_is_vehicle_associated(person_box, vehicle_boxes)
+                            ),
+                        ))
+                        continue
                     if vehicle_type not in VEHICLE_CLASSES:
                         continue
-                    x1, y1, x2, y2 = (int(value) for value in box_raw)
                     measurement = LiveSpeedMeasurement(
                         0.0, 0.0, 0, False, self.speed_calibration
                     )
@@ -930,7 +993,7 @@ class TrafficRuntime:
                             event = self._save_live_violation(
                                 item.frame, (x1, y1, x2, y2), persisted.get(track_id),
                                 track_id, vehicle_type, "OVERSPEED", measurement.confidence,
-                                item.generation, direction=None, lane_id=None,
+                                item.generation, direction=None, lane_id=None, speed=speed,
                             )
                             if event:
                                 confirmed_violations[track_id].add("OVERSPEED")
@@ -952,6 +1015,7 @@ class TrafficRuntime:
                                     item.frame, (x1, y1, x2, y2), persisted.get(track_id),
                                     track_id, vehicle_type, "NO_HELMET", confirmed,
                                     item.generation, direction=None, lane_id=None,
+                                    speed=speed if speed_available else None,
                                 )
                                 if event:
                                     confirmed_violations[track_id].add("NO_HELMET")
@@ -966,6 +1030,7 @@ class TrafficRuntime:
                                         track_id, vehicle_type, decision.violation_type,
                                         decision.confidence, item.generation,
                                         direction=decision.direction, lane_id=decision.lane_id,
+                                        speed=speed if speed_available else None,
                                     )
                                     if event:
                                         confirmed_violations[track_id].add(decision.violation_type)

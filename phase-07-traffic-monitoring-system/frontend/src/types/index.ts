@@ -1,9 +1,15 @@
 export type VehicleStatus = "NORMAL" | "OVERSPEED";
 export type ViolationType = "OVERSPEED" | "NO_HELMET" | "WRONG_LANE" | "WRONG_DIRECTION";
 export type ConnectionStatus = "connected" | "reconnecting" | "offline";
+export type LiveOverlayFilter = "all" | "car" | "bike" | "person" | "violation" | "no_helmet" | "wrong_lane" | "overspeed";
 export type VehicleType = "bicycle" | "car" | "motorcycle" | "bus" | "truck" | "unknown";
 export type AnalyticsRange = "hour" | "today" | "week";
 export type VideoAnalysisStatus = "queued" | "processing" | "completed" | "failed";
+export type AlertSeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+export type AlertStatus = "NEW" | "ACKNOWLEDGED" | "INVESTIGATING" | "RESOLVED" | "FALSE_POSITIVE";
+export type ReportType = "TRAFFIC_SUMMARY" | "VIOLATION_ENFORCEMENT" | "ALERT_RESPONSE" | "VEHICLE_FLOW" | "CAMERA_PERFORMANCE" | "CUSTOM";
+export type ReportStatus = "GENERATING" | "READY" | "FAILED";
+export type ReportFrequency = "DAILY" | "WEEKLY" | "MONTHLY";
 
 export interface AuthUser {
   id: number;
@@ -85,6 +91,7 @@ export interface LiveCameraCalibration {
 export interface CameraSettings {
   confidence: number;
   showOverlays: boolean;
+  overlayFilters: LiveOverlayFilter[];
 }
 
 export interface LaneRule {
@@ -109,6 +116,250 @@ export interface ViolationEvent {
   direction: string | null;
   snapshotUrl: string | null;
   detectedAt: string;
+  plate?: string | null;
+  plateConfidence?: number | null;
+  plateStatus?: "NOT_CONFIGURED" | "NOT_DETECTED" | "POSSIBLE" | "CONFIRMED" | null;
+  speed?: number | null;
+  speedAvailable?: boolean;
+  speedLimit?: number;
+  vehicleStatus?: VehicleStatus | null;
+  vehicleSnapshotUrl?: string | null;
+}
+
+export interface ViolationQuery {
+  page: number;
+  pageSize: number;
+  type?: ViolationType | "";
+  vehicleType?: VehicleType | "";
+  search?: string;
+  date?: "" | "today" | "week";
+  camera?: string;
+  sort?: "time_desc" | "time_asc" | "speed_desc" | "confidence_desc";
+}
+
+export interface PaginatedViolations {
+  items: ViolationEvent[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface ViolationSummary {
+  total: number;
+  counts: Partial<Record<ViolationType, number>>;
+  latest: ViolationEvent | null;
+}
+
+export interface AlertAssignee {
+  id: number;
+  name: string;
+  email: string;
+}
+
+export interface AlertActivity {
+  id: number;
+  action: string;
+  fromStatus: AlertStatus | null;
+  toStatus: AlertStatus | null;
+  actorUserId: number | null;
+  actorName: string;
+  note: string | null;
+  alertVersion: number;
+  createdAt: string;
+}
+
+export interface AlertRecord {
+  id: number;
+  primaryViolationId: number;
+  violationId: number;
+  trackingId: number;
+  cameraId: string;
+  cameraName: string;
+  type: ViolationType;
+  severity: AlertSeverity;
+  status: AlertStatus;
+  assignedTo: AlertAssignee | null;
+  occurrenceCount: number;
+  firstOccurrenceAt: string;
+  lastOccurrenceAt: string;
+  acknowledgedAt: string | null;
+  resolvedAt: string | null;
+  resolutionNote: string | null;
+  falsePositiveReason: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  vehicleId: number | null;
+  vehicleType: VehicleType;
+  plate: string | null;
+  plateConfidence: number | null;
+  confidence: number;
+  laneId: number | null;
+  direction: string | null;
+  speed: number | null;
+  speedAvailable: boolean;
+  speedLimit: number;
+  snapshotUrl: string | null;
+  detectedAt: string;
+}
+
+export interface AlertDetail extends AlertRecord {
+  activity: AlertActivity[];
+  occurrences: { violationId: number; occurredAt: string }[];
+}
+
+export interface AlertQuery {
+  page: number;
+  pageSize: number;
+  status?: AlertStatus | "";
+  severity?: AlertSeverity | "";
+  type?: ViolationType | "";
+  vehicleType?: VehicleType | "";
+  camera?: string;
+  assignedTo?: "" | "me" | "unassigned" | `${number}`;
+  search?: string;
+  date?: "" | "today" | "week";
+  sort?: "newest" | "oldest" | "severity";
+}
+
+export interface PaginatedAlerts {
+  items: AlertRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface AlertSummary {
+  total: number;
+  new: number;
+  unresolved: number;
+  critical: number;
+  resolvedToday: number;
+  averageResponseSeconds: number | null;
+  bySeverity: Partial<Record<AlertSeverity, number>>;
+}
+
+export interface ReportFilters {
+  startAt: string;
+  endAt: string;
+  timezone: string;
+  camera: string;
+  vehicleType: VehicleType | "";
+  violationType: ViolationType | "";
+  alertSeverity: AlertSeverity | "";
+  alertStatus: AlertStatus | "";
+  assignedTo: number | null;
+}
+
+export interface ReportTemplate {
+  type: ReportType;
+  name: string;
+  description: string;
+  sections: string[];
+}
+
+export interface ReportSnapshot {
+  schemaVersion: number;
+  reportType: ReportType;
+  generatedAt: string;
+  timezone: string;
+  filters: ReportFilters;
+  sections: string[];
+  speedLimit: number;
+  dataNote: string;
+  warnings: string[];
+  sourceCounts: { vehicles: number; measuredSpeeds: number; violations: number; alerts: number };
+  traffic: {
+    totalDetections: number;
+    measuredSpeedCount: number;
+    averageSpeed: number | null;
+    maximumSpeed: number | null;
+    overspeedCount: number;
+    overspeedPercentage: number;
+    vehicleDistribution: { name: string; value: number }[];
+    trafficTrend: { period: string; detections: number; overspeed: number }[];
+    busiestPeriod: { period: string; detections: number; overspeed: number } | null;
+    quietestPeriod: { period: string; detections: number; overspeed: number } | null;
+    laneDirection: { laneId: number | null; direction: string | null; events: number }[];
+  };
+  comparison: { previousTotal: number; currentTotal: number; percentageChange: number | null };
+  violations: { total: number; distribution: { type: ViolationType; count: number }[]; records: Record<string, unknown>[]; recordsTruncated: boolean };
+  alerts: {
+    total: number;
+    criticalUnresolved: number;
+    averageAcknowledgementSeconds: number | null;
+    averageResolutionSeconds: number | null;
+    byStatus: { name: AlertStatus; value: number }[];
+    bySeverity: { name: AlertSeverity; value: number }[];
+    records: Record<string, unknown>[];
+    auditSummary: { action: string; count: number }[];
+    recordsTruncated: boolean;
+  };
+  camera: {
+    cameraId: string;
+    cameraName: string;
+    runtimeStatus: string;
+    analysisFps: number | null;
+    analysisFpsHistorical: boolean;
+    calibrationConfigured: boolean | null;
+    evidenceCaptures: number;
+    capabilities: Record<string, Capability>;
+  };
+}
+
+export interface ReportRecord {
+  id: number;
+  definitionId: number | null;
+  name: string;
+  type: ReportType;
+  status: ReportStatus;
+  filters: ReportFilters;
+  sections: string[];
+  creator: AuthUser;
+  createdAt: string;
+  completedAt: string | null;
+  failureReason: string | null;
+  sourceCounts: Partial<ReportSnapshot["sourceCounts"]>;
+  version: number;
+  availableFormats: Array<"pdf" | "csv">;
+  snapshot?: ReportSnapshot | null;
+}
+
+export interface ReportQuery {
+  page: number;
+  pageSize: number;
+  search?: string;
+  type?: ReportType | "";
+  status?: ReportStatus | "";
+  creator?: number | null;
+  date?: "" | "today" | "week";
+  sort?: "newest" | "oldest";
+}
+
+export interface ReportSummary {
+  total: number;
+  ready: number;
+  failed: number;
+  scheduled: number;
+  thisMonth: number;
+}
+
+export interface ReportSchedule {
+  id: number;
+  name: string;
+  type: ReportType;
+  frequency: ReportFrequency;
+  generationTime: string;
+  timezone: string;
+  filters: Omit<ReportFilters, "startAt" | "endAt" | "timezone">;
+  sections: string[];
+  enabled: boolean;
+  lastRunAt: string | null;
+  nextRunAt: string;
+  creator: AuthUser;
+  createdAt: string;
+  updatedAt: string;
+  delivery: "Not configured";
 }
 
 export interface Capability {
@@ -162,6 +413,11 @@ export interface LiveViolationEvent {
   data: ViolationEvent;
 }
 
+export interface LiveAlertEvent {
+  type: "alert_event";
+  data: AlertRecord;
+}
+
 export interface SystemStatusEvent {
   type: "system_status";
   data: {
@@ -176,7 +432,7 @@ export interface SystemStatusEvent {
   };
 }
 
-export type LiveEvent = LiveDetectionEvent | LiveViolationEvent | SystemStatusEvent;
+export type LiveEvent = LiveDetectionEvent | LiveViolationEvent | LiveAlertEvent | SystemStatusEvent;
 
 export interface VideoAnalysisOptions {
   location: string;
@@ -206,7 +462,23 @@ export interface AnalyzedVehicle {
   speedLimit: number;
   status: "NORMAL" | "OVERSPEED" | "INSUFFICIENT_DATA";
   direction: string;
-  violations: string[];
+  violations: VideoAnalysisViolationType[];
+}
+
+export type VideoAnalysisViolationType = "OVERSPEED" | "NO_HELMET" | "WRONG_DIRECTION" | "WRONG_LANE";
+
+export interface VideoAnalysisViolation {
+  id: string;
+  trackingId: number;
+  type: VideoAnalysisViolationType;
+  vehicleType: string;
+  plate: string | null;
+  lane: number | null;
+  direction: string;
+  speed: number | null;
+  speedLimit: number;
+  confidence: number;
+  detectedAtSeconds: number;
 }
 
 export interface VideoAnalysisResult {
@@ -231,6 +503,8 @@ export interface VideoAnalysisResult {
     totalVehicles: number;
     lineCrossingVehicles: number;
     overspeedVehicles: number;
+    totalViolations?: number;
+    violationCounts?: Partial<Record<VideoAnalysisViolationType, number>>;
     averageSpeed: number | null;
     maxSpeed: number | null;
     speedLimit: number;
@@ -245,6 +519,7 @@ export interface VideoAnalysisResult {
     overspeed: number;
   }[];
   vehicles: AnalyzedVehicle[];
+  violations?: VideoAnalysisViolation[];
   artifacts: {
     annotatedVideoUrl: string | null;
     frameRate: number;
@@ -253,7 +528,7 @@ export interface VideoAnalysisResult {
   capabilities: Record<string, {
     available: boolean;
     model?: string;
-    method?: string;
+    method?: string | null;
     reason?: string | null;
   }>;
   analysis: {

@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+from pathlib import Path
 
 from web.video_analysis import (
     _build_timeline,
@@ -8,6 +10,8 @@ from web.video_analysis import (
     _link_download_error,
     _source_filename,
     _trimmed_average,
+    get_annotated_video,
+    jobs,
 )
 
 
@@ -47,6 +51,19 @@ class VideoAnalysisHelperTests(unittest.TestCase):
             "Road _ Junction_.mp4",
         )
         self.assertIn("private", _link_download_error("Video is private").lower())
+
+    def test_annotated_video_is_served_inline_for_in_app_playback(self):
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as handle:
+            handle.write(b"video")
+            path = handle.name
+        try:
+            job_id = jobs.create("junction.mp4")
+            jobs.update(job_id, _outputPath=path)
+            response = get_annotated_video(job_id)
+            self.assertTrue(response.headers["content-disposition"].startswith("inline;"))
+            self.assertEqual(response.headers["cache-control"], "private, max-age=300")
+        finally:
+            Path(path).unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

@@ -2,18 +2,20 @@ import {
   Activity, AlertTriangle, BarChart3, Bell, CarFront, ChevronLeft, ChevronRight,
   FileText, RadioTower, Settings, ShieldCheck, Video
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../../app/AuthContext";
 import { usePathname } from "../../app/router";
 import { cx } from "../../lib/format";
+import { api } from "../../services/api";
 import { Link } from "../ui/Link";
 
 const navigation = [
   { to: "/app", label: "Live Operations", icon: RadioTower },
   { to: "/app/history", label: "Vehicles", icon: CarFront },
-  { to: "/app/history?status=OVERSPEED", label: "Violations", icon: AlertTriangle },
-  { to: "/app/history?status=OVERSPEED&view=alerts", label: "Alerts", icon: Bell },
+  { to: "/app/violations", label: "Violations", icon: AlertTriangle },
+  { to: "/app/alerts", label: "Alerts", icon: Bell },
   { to: "/app/analytics", label: "Analytics", icon: BarChart3 },
-  { to: "/app/analytics?view=reports", label: "Reports", icon: FileText },
+  { to: "/app/reports", label: "Reports", icon: FileText },
   { to: "/app/analyze", label: "Analyze Video", icon: Video },
   { to: "/app?panel=settings", label: "Settings", icon: Settings }
 ] as const;
@@ -50,14 +52,35 @@ function Operator({ collapsed = false }: { collapsed?: boolean }) {
 
 export function AppSidebar({ collapsed, mobileOpen, onCollapse, onClose }: { collapsed: boolean; mobileOpen: boolean; onCollapse: () => void; onClose: () => void }) {
   const pathname = usePathname().replace(/\/+$/, "") || "/";
+  const [newAlerts, setNewAlerts] = useState(0);
+  useEffect(() => {
+    const increment = () => setNewAlerts((count) => count + 1);
+    const synchronize = (event: Event) => setNewAlerts(Math.max(0, Number((event as CustomEvent<number>).detail) || 0));
+    window.addEventListener("trafficops:new-alert", increment);
+    window.addEventListener("trafficops:alert-count", synchronize);
+    return () => {
+      window.removeEventListener("trafficops:new-alert", increment);
+      window.removeEventListener("trafficops:alert-count", synchronize);
+    };
+  }, []);
+  useEffect(() => {
+    void api.getAlertSummary("all").then((summary) => setNewAlerts(summary.new)).catch(() => undefined);
+  }, []);
   const sidebar = (
     <div className="flex h-full flex-col">
       <div className={cx("flex h-[82px] items-center border-b border-border px-5", collapsed && "justify-center px-2")}><Brand collapsed={collapsed} /></div>
       <nav className="scrollbar-thin flex-1 space-y-1 overflow-y-auto px-3 py-2" aria-label="Product navigation">
         {navigation.map(({ to, label, icon: Icon }) => {
           const path = to.split("?")[0];
-          const active = path === "/app" ? pathname === "/app" && label === "Live Operations" : pathname === path && (path === "/app/history" ? label === "Vehicles" : path === "/app/analytics" ? label === "Analytics" : true);
-          return <Link key={label} to={to} onClick={onClose} aria-current={active ? "page" : undefined} title={collapsed ? label : undefined} className={cx("sidebar-link", active && "sidebar-link-active", collapsed && "justify-center px-0")}><Icon size={18} strokeWidth={1.9} /><span className={cx(collapsed && "sr-only")}>{label}</span></Link>;
+          const active = path === "/app"
+            ? pathname === "/app" && label === "Live Operations"
+            : pathname === path && (
+              path === "/app/history" ? label === "Vehicles"
+              : path === "/app/violations" ? label === "Violations"
+              : path === "/app/analytics" ? label === "Analytics"
+              : true
+            );
+          return <Link key={label} to={to} onClick={onClose} aria-current={active ? "page" : undefined} title={collapsed ? label : undefined} className={cx("sidebar-link relative", active && "sidebar-link-active", collapsed && "justify-center px-0")}><Icon size={18} strokeWidth={1.9} /><span className={cx(collapsed && "sr-only")}>{label}</span>{label === "Alerts" && newAlerts > 0 && <span className={cx("ml-auto min-w-5 rounded-full bg-danger px-1.5 py-0.5 text-center text-[9px] font-bold text-white", collapsed && "absolute right-1 top-1")}>{newAlerts > 99 ? "99+" : newAlerts}</span>}</Link>;
         })}
       </nav>
       <div className="space-y-3 p-3"><SystemStatus collapsed={collapsed} /><Operator collapsed={collapsed} /></div>

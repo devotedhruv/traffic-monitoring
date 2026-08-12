@@ -7,6 +7,7 @@ import { LiveProvider } from "./LiveContext";
 import { ThemeProvider } from "./ThemeContext";
 import { navigate, usePathname } from "./router";
 import { AuthProvider, useAuth } from "./AuthContext";
+import { AlertNotificationManager } from "../features/alerts/AlertNotificationManager";
 
 import { LandingPage } from "../pages/LandingPage";
 import { AuthPage } from "../pages/AuthPage";
@@ -14,6 +15,9 @@ import { AuthPage } from "../pages/AuthPage";
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 10_000, retry: 1, refetchOnWindowFocus: false } } });
 const DashboardPage = lazy(() => import("../pages/DashboardPage").then((module) => ({ default: module.DashboardPage })));
 const HistoryPage = lazy(() => import("../pages/HistoryPage").then((module) => ({ default: module.HistoryPage })));
+const ViolationsPage = lazy(() => import("../pages/ViolationsPage").then((module) => ({ default: module.ViolationsPage })));
+const AlertsPage = lazy(() => import("../pages/AlertsPage").then((module) => ({ default: module.AlertsPage })));
+const ReportsPage = lazy(() => import("../pages/ReportsPage").then((module) => ({ default: module.ReportsPage })));
 const AnalyticsPage = lazy(() => import("../pages/AnalyticsPage").then((module) => ({ default: module.AnalyticsPage })));
 const UploadAnalysisPage = lazy(() => import("../pages/UploadAnalysisPage").then((module) => ({ default: module.UploadAnalysisPage })));
 
@@ -31,13 +35,19 @@ function Application({ pathname }: { pathname: string }) {
     ? <DashboardPage />
     : pathname === "/app/history"
       ? <HistoryPage />
+      : pathname === "/app/violations"
+        ? <ViolationsPage />
+      : pathname === "/app/alerts"
+        ? <AlertsPage />
+      : pathname === "/app/reports"
+        ? <ReportsPage />
       : pathname === "/app/analytics"
         ? <AnalyticsPage />
         : pathname === "/app/analyze"
           ? <UploadAnalysisPage />
           : <NotFoundPage inApp />;
 
-  return <LiveProvider><AppLayout><Suspense fallback={<LoadingSkeleton className="h-[70vh]" />}>{page}</Suspense></AppLayout></LiveProvider>;
+  return <LiveProvider><AlertNotificationManager /><AppLayout><Suspense fallback={<LoadingSkeleton className="h-[70vh]" />}>{page}</Suspense></AppLayout></LiveProvider>;
 }
 
 function CurrentPage() {

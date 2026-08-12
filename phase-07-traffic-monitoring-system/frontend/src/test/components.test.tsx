@@ -106,8 +106,8 @@ describe("operational UI", () => {
   });
 
   it("toggles a clean feed without changing detection settings", async () => {
-    const getSettings = vi.spyOn(api, "getCameraSettings").mockResolvedValue({ confidence: 0.1, showOverlays: true });
-    const update = vi.spyOn(api, "updateCameraSettings").mockResolvedValue({ confidence: 0.1, showOverlays: false });
+    const getSettings = vi.spyOn(api, "getCameraSettings").mockResolvedValue({ confidence: 0.1, showOverlays: true, overlayFilters: ["all"] });
+    const update = vi.spyOn(api, "updateCameraSettings").mockResolvedValue({ confidence: 0.1, showOverlays: false, overlayFilters: ["all"] });
     render(<LiveCamera cameraId="camera-01" cameraName="North Junction" connection="connected" fps={25} analysisFps={3} activeTracks={42} activeDetections={38} />);
 
     await waitFor(() => expect(getSettings).toHaveBeenCalledWith("camera-01"));
@@ -116,6 +116,19 @@ describe("operational UI", () => {
     await waitFor(() => expect(update).toHaveBeenCalledWith("camera-01", { showOverlays: false }));
     expect(await screen.findByRole("button", { name: "Show vehicle IDs and boxes" })).toBeInTheDocument();
     expect(screen.getByText(/clean view enabled/i)).toHaveTextContent(/tracking remain/i);
+  });
+
+  it("applies selected object and violation filters to the live stream", async () => {
+    vi.spyOn(api, "getCameraSettings").mockResolvedValue({ confidence: 0.25, showOverlays: true, overlayFilters: ["all"] });
+    const update = vi.spyOn(api, "updateCameraSettings").mockResolvedValue({ confidence: 0.25, showOverlays: true, overlayFilters: ["car"] });
+    render(<LiveCamera cameraId="camera-01" cameraName="North Junction" connection="connected" fps={25} analysisFps={3} activeTracks={42} activeDetections={38} />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Filter live detections by All" })).toHaveAttribute("aria-pressed", "true"));
+    fireEvent.click(screen.getByRole("button", { name: "Filter live detections by Car" }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith("camera-01", { overlayFilters: ["car"] }));
+    expect(screen.getByRole("button", { name: "Filter live detections by Car" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/filtered to Car/i)).toHaveTextContent(/monitoring remains active/i);
   });
 
   it("renders the manual video analysis workflow", () => {

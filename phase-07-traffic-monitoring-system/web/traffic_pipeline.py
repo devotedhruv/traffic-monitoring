@@ -486,8 +486,24 @@ def analyze_video(
     type_counts = Counter(item["vehicleType"] for item in vehicles)
     color_counts = Counter(item["color"] for item in vehicles if item["color"] != "UNKNOWN")
     timeline = _build_timeline(vehicles, duration)
+    violation_events = _build_violation_events(vehicles)
+    violation_counts = Counter(event["type"] for event in violation_events)
     peak_bucket = max(timeline, key=lambda item: item["detections"], default=None)
     artifact_path = _transcode_output(raw_output) if output_writer is not None else None
+    capabilities = specialists.capabilities()
+    capabilities["wrongDirectionDetection"] = {
+        "available": settings.allowedDirection != "both",
+        "method": "calibrated trajectory compared with the configured travel direction"
+        if settings.allowedDirection != "both"
+        else None,
+        "reason": None
+        if settings.allowedDirection != "both"
+        else "Allowed travel direction is set to both directions",
+    }
+    capabilities["wrongLaneDetection"] = {
+        "available": False,
+        "reason": "Per-lane movement and vehicle-class rules are not configured for uploaded video analysis",
+    }
 
     video_details: dict[str, Any] = {
         "filename": filename,
@@ -523,6 +539,8 @@ def analyze_video(
             "totalVehicles": len(vehicles),
             "lineCrossingVehicles": line_crossings,
             "overspeedVehicles": overspeed,
+            "totalViolations": len(violation_events),
+            "violationCounts": dict(sorted(violation_counts.items())),
             "averageSpeed": round(sum(vehicle_speeds) / len(vehicle_speeds), 2) if vehicle_speeds else None,
             "maxSpeed": round(max(vehicle_speeds), 2) if vehicle_speeds else None,
             "speedLimit": speed_limit,
@@ -532,12 +550,13 @@ def analyze_video(
         "vehicleColors": [{"name": name, "value": count} for name, count in color_counts.most_common()],
         "timeline": timeline,
         "vehicles": vehicles,
+        "violations": violation_events,
         "artifacts": {
             "annotatedVideoUrl": artifact_url if artifact_path else None,
             "frameRate": round(output_fps, 2),
             "containsSampledFrames": sample_interval > 1,
         },
-        "capabilities": specialists.capabilities(),
+        "capabilities": capabilities,
         "analysis": {
             "completedAt": _iso_time(time.time()),
             "processingSeconds": round(time.monotonic() - started, 2),
@@ -554,11 +573,37 @@ def analyze_video(
             "speedIsEstimated": True,
             "stabilizationEnabled": settings.stabilize,
             "stabilizedFrames": stabilization_frames,
-            "plateRecognitionAvailable": specialists.capabilities()["plateRecognition"]["available"],
+            "plateRecognitionAvailable": capabilities["plateRecognition"]["available"],
             "note": calibrated_note,
         },
     }
     return result, artifact_path
+
+
+def _build_violation_events(vehicles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Flatten track-level rule results into seekable evidence events."""
+    events: list[dict[str, Any]] = []
+    for vehicle in vehicles:
+        detected_at = vehicle["countedAtSeconds"]
+        if detected_at is None:
+            detected_at = vehicle["firstSeenSeconds"]
+        for violation in vehicle["violations"]:
+            events.append(
+                {
+                    "id": f'{vehicle["trackingId"]}:{violation}',
+                    "trackingId": vehicle["trackingId"],
+                    "type": violation,
+                    "vehicleType": vehicle["vehicleType"],
+                    "plate": vehicle["plate"],
+                    "lane": vehicle["lane"],
+                    "direction": vehicle["direction"],
+                    "speed": vehicle["estimatedSpeed"],
+                    "speedLimit": vehicle["speedLimit"],
+                    "confidence": vehicle["confidence"],
+                    "detectedAtSeconds": detected_at,
+                }
+            )
+    return sorted(events, key=lambda event: (event["detectedAtSeconds"], event["trackingId"], event["type"]))
 
 
 def _build_road_plane(settings: CalibrationSettings, width: int, height: int) -> _RoadPlane:

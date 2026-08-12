@@ -10,6 +10,7 @@ from web.runtime import (
 )
 from web.violations import (
     HelmetSpecialist, HelmetVoteTracker, LaneRule, LaneViolationTracker, associate_rider,
+    person_is_vehicle_associated,
 )
 
 
@@ -159,6 +160,44 @@ class LiveRuntimeTests(unittest.TestCase):
         self.assertFalse(np.any(clean))
         self.assertEqual(runtime._annotations[0].track_id, 3)
 
+    def test_overlay_filters_match_objects_and_specific_violations(self):
+        runtime = TrafficRuntime()
+        car = FrameAnnotation(1, "car", 0.9, (2, 2, 12, 12), 20, "NORMAL")
+        person = FrameAnnotation(2, "person", 0.8, (15, 2, 25, 18), 0, "NORMAL")
+        rider = FrameAnnotation(
+            6, "person", 0.8, (28, 2, 38, 18), 0, "NORMAL", vehicle_associated=True
+        )
+        no_helmet = FrameAnnotation(
+            3, "motorcycle", 0.85, (28, 2, 38, 18), 18, "NORMAL", ("NO_HELMET",)
+        )
+        wrong_lane = FrameAnnotation(
+            4, "bus", 0.88, (41, 2, 55, 18), 22, "NORMAL", ("WRONG_LANE",)
+        )
+        overspeed = FrameAnnotation(5, "car", 0.92, (58, 2, 70, 18), 68, "OVERSPEED")
+
+        runtime.set_overlay_filters(["car"])
+        self.assertTrue(runtime._annotation_is_visible(car))
+        self.assertTrue(runtime._annotation_is_visible(overspeed))
+        self.assertFalse(runtime._annotation_is_visible(person))
+        runtime.set_overlay_filters(["bike", "person"])
+        self.assertTrue(runtime._annotation_is_visible(person))
+        self.assertFalse(runtime._annotation_is_visible(rider))
+        self.assertTrue(runtime._annotation_is_visible(no_helmet))
+        self.assertFalse(runtime._annotation_is_visible(wrong_lane))
+        runtime.set_overlay_filters(["violation"])
+        self.assertTrue(runtime._annotation_is_visible(no_helmet))
+        self.assertTrue(runtime._annotation_is_visible(wrong_lane))
+        self.assertTrue(runtime._annotation_is_visible(overspeed))
+        self.assertFalse(runtime._annotation_is_visible(car))
+        runtime.set_overlay_filters(["no_helmet"])
+        self.assertTrue(runtime._annotation_is_visible(no_helmet))
+        self.assertFalse(runtime._annotation_is_visible(wrong_lane))
+        runtime.set_overlay_filters(["wrong_lane"])
+        self.assertTrue(runtime._annotation_is_visible(wrong_lane))
+        runtime.set_overlay_filters(["overspeed"])
+        self.assertTrue(runtime._annotation_is_visible(overspeed))
+        self.assertFalse(runtime._annotation_is_visible(no_helmet))
+
     def test_missing_helmet_weights_are_reported_without_crashing(self):
         specialist = HelmetSpecialist("/missing/helmet-best.pt", 0.35)
 
@@ -191,6 +230,17 @@ class LiveRuntimeTests(unittest.TestCase):
 
         self.assertEqual(associate_rider(motorcycle, [pedestrian, rider]), rider)
         self.assertIsNone(associate_rider(motorcycle, [pedestrian]))
+
+    def test_person_filter_excludes_people_associated_with_any_vehicle(self):
+        rider = (45, 15, 76, 76)
+        pedestrian = (120, 10, 155, 90)
+        motorcycle = (40, 50, 80, 95)
+        person_inside_car = (45, 30, 65, 70)
+        car = (40, 40, 80, 80)
+
+        self.assertTrue(person_is_vehicle_associated(rider, [("motorcycle", motorcycle)]))
+        self.assertTrue(person_is_vehicle_associated(person_inside_car, [("car", car)]))
+        self.assertFalse(person_is_vehicle_associated(pedestrian, [("motorcycle", motorcycle), ("car", car)]))
 
     def test_stable_illegal_lane_emits_once_after_grace_and_mature_trajectory(self):
         tracker = LaneViolationTracker(

@@ -260,7 +260,10 @@ def get_annotated_video(job_id: str):
     return FileResponse(
         path,
         media_type="video/mp4",
-        filename=f"trafficops-{job_id[:8]}-annotated.mp4",
+        headers={
+            "Content-Disposition": f'inline; filename="trafficops-{job_id[:8]}-annotated.mp4"',
+            "Cache-Control": "private, max-age=300",
+        },
     )
 
 

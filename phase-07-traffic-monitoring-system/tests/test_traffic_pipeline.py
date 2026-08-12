@@ -7,6 +7,7 @@ from web.traffic_pipeline import (
     NormalizedPoint,
     _Track,
     _build_road_plane,
+    _build_violation_events,
     _record_ground_speed,
     _record_line_crossing,
     _serialize_track,
@@ -73,6 +74,27 @@ class TrafficPipelineTests(unittest.TestCase):
 
     def test_speed_average_rejects_short_track_outlier(self):
         self.assertAlmostEqual(_trimmed_average([29, 30, 31, 160]), 30, places=2)
+
+    def test_violation_events_are_seekable_and_keep_vehicle_evidence(self):
+        vehicles = [
+            {
+                "trackingId": 12,
+                "vehicleType": "motorcycle",
+                "plate": "BA 12 PA 3456",
+                "lane": 2,
+                "direction": "Left to right",
+                "estimatedSpeed": 61.4,
+                "speedLimit": 50,
+                "confidence": 0.91,
+                "firstSeenSeconds": 2.1,
+                "countedAtSeconds": 4.3,
+                "violations": ["OVERSPEED", "NO_HELMET"],
+            }
+        ]
+        events = _build_violation_events(vehicles)
+        self.assertEqual([event["type"] for event in events], ["NO_HELMET", "OVERSPEED"])
+        self.assertTrue(all(event["detectedAtSeconds"] == 4.3 for event in events))
+        self.assertEqual(events[0]["plate"], "BA 12 PA 3456")
 
 
 if __name__ == "__main__":

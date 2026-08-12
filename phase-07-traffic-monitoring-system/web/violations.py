@@ -298,3 +298,27 @@ def associate_rider(
         if best is None or score > best[0]:
             best = (score, person)
     return best[1] if best else None
+
+
+def person_is_vehicle_associated(
+    person: tuple[int, int, int, int],
+    vehicles: Iterable[tuple[str, tuple[int, int, int, int]]],
+) -> bool:
+    """Distinguish pedestrians from people riding or substantially inside a vehicle box."""
+    px1, py1, px2, py2 = person
+    person_area = max(1, px2 - px1) * max(1, py2 - py1)
+    person_bottom_center = ((px1 + px2) / 2, py2)
+    for vehicle_type, vehicle in vehicles:
+        if vehicle_type in {"bicycle", "motorcycle"}:
+            if associate_rider(vehicle, (person,)) is not None:
+                return True
+            continue
+        vx1, vy1, vx2, vy2 = vehicle
+        intersection_width = max(0, min(px2, vx2) - max(px1, vx1))
+        intersection_height = max(0, min(py2, vy2) - max(py1, vy1))
+        overlap = intersection_width * intersection_height / person_area
+        bottom_x, bottom_y = person_bottom_center
+        bottom_inside = vx1 <= bottom_x <= vx2 and vy1 <= bottom_y <= vy2
+        if overlap >= 0.35 and bottom_inside:
+            return True
+    return False
