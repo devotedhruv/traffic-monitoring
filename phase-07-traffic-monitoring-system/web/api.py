@@ -1,4 +1,4 @@
-"""FastAPI application exposing TrafficOps data and the live CV pipeline."""
+"""FastAPI application exposing SadakDrishti data and the live CV pipeline."""
 
 import asyncio
 import math
@@ -21,7 +21,8 @@ from config.settings import (
 )
 from src.database import (
     alert_summary, analytics, assign_alert, create_database, dashboard_summary,
-    get_alert, get_vehicle, get_vehicle_plate_image_path, get_violation_evidence_path,
+    get_alert, get_vehicle, get_vehicle_plate_image_path, get_vehicle_snapshot_path,
+    get_violation_evidence_path,
     list_operators, list_plate_reads, list_vehicles, plate_reads_total, query_alerts,
     query_violations, save_camera_calibration, save_camera_lane_rules,
     update_alert_status, violation_summary,
@@ -59,7 +60,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="TrafficOps API",
+    title="SadakDrishti API",
     version="1.0.0",
     description="REST, MJPEG, and WebSocket API for the AI traffic-monitoring pipeline.",
     lifespan=lifespan,
@@ -80,7 +81,7 @@ class CameraSettingsRequest(BaseModel):
     confidence: float | None = Field(default=None, ge=0.05, le=0.9)
     showOverlays: bool | None = None
     overlayFilters: list[Literal[
-        "all", "car", "bike", "person", "violation",
+        "all", "car", "bike", "bus", "truck", "person", "violation",
         "no_helmet", "wrong_lane", "overspeed",
     ]] | None = None
 
@@ -181,6 +182,18 @@ def vehicle(vehicle_id: int):
     if result is None:
         raise HTTPException(status_code=404, detail="Vehicle detection not found")
     return result
+
+
+@app.get("/api/vehicles/{vehicle_id}/snapshot", dependencies=[Depends(require_user)])
+def vehicle_snapshot(vehicle_id: int):
+    snapshot_path = get_vehicle_snapshot_path(vehicle_id)
+    if not snapshot_path:
+        raise HTTPException(status_code=404, detail="Detection snapshot not found")
+    resolved = Path(snapshot_path).resolve()
+    snapshot_root = (PROJECT_ROOT / "output" / "detections").resolve()
+    if not resolved.is_file() or not resolved.is_relative_to(snapshot_root):
+        raise HTTPException(status_code=404, detail="Detection snapshot not found")
+    return FileResponse(resolved, media_type="image/jpeg")
 
 
 @app.get("/api/plates", dependencies=[Depends(require_user)])

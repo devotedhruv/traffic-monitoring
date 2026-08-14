@@ -7,6 +7,7 @@ import { LiveCamera } from "../features/dashboard/LiveCamera";
 import { NumberPlatePanel } from "../features/dashboard/NumberPlatePanel";
 import { SpeedGauge } from "../features/dashboard/SpeedGauge";
 import { DetectionTable } from "../features/vehicles/DetectionTable";
+import { VehicleDetailsDrawer } from "../features/vehicles/VehicleDetailsDrawer";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { UploadAnalysisPage } from "../pages/UploadAnalysisPage";
 import type { VehicleDetection, VehicleQuery } from "../types";
@@ -49,6 +50,13 @@ describe("operational UI", () => {
     render(<DetectionTable data={{ items: [vehicle], total: 1, page: 1, pageSize: 10 }} query={query} onQueryChange={vi.fn()} onSelect={select} />);
     fireEvent.keyDown(screen.getByRole("button", { name: /view details/i }), { key: "Enter" });
     expect(select).toHaveBeenCalledWith(vehicle);
+  });
+
+  it("shows the snapshot captured for a detection record", () => {
+    render(<VehicleDetailsDrawer vehicle={{ ...vehicle, snapshotUrl: "/api/vehicles/1/snapshot" }} onClose={vi.fn()} />);
+
+    expect(screen.getByRole("img", { name: /at the moment it was detected/i })).toHaveAttribute("src", "/api/vehicles/1/snapshot");
+    expect(screen.getByRole("link", { name: /open vehicle 42 detection snapshot/i })).toHaveAttribute("href", "/api/vehicles/1/snapshot");
   });
 
   it("labels a tracked vehicle whose speed is not ready yet", () => {
@@ -129,6 +137,19 @@ describe("operational UI", () => {
     await waitFor(() => expect(update).toHaveBeenCalledWith("camera-01", { overlayFilters: ["car"] }));
     expect(screen.getByRole("button", { name: "Filter live detections by Car" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText(/filtered to Car/i)).toHaveTextContent(/monitoring remains active/i);
+  });
+
+  it("offers bus and truck live overlay filters", async () => {
+    vi.spyOn(api, "getCameraSettings").mockResolvedValue({ confidence: 0.25, showOverlays: true, overlayFilters: ["all"] });
+    const update = vi.spyOn(api, "updateCameraSettings").mockResolvedValue({ confidence: 0.25, showOverlays: true, overlayFilters: ["bus"] });
+    render(<LiveCamera cameraId="camera-01" cameraName="North Junction" connection="connected" fps={25} analysisFps={3} activeTracks={42} activeDetections={38} />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Filter live detections by Bus" })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Filter live detections by Truck" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Filter live detections by Bus" }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith("camera-01", { overlayFilters: ["bus"] }));
+    expect(screen.getByRole("button", { name: "Filter live detections by Bus" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("renders the manual video analysis workflow", () => {

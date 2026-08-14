@@ -1,7 +1,7 @@
 export type VehicleStatus = "NORMAL" | "OVERSPEED";
 export type ViolationType = "OVERSPEED" | "NO_HELMET" | "WRONG_LANE" | "WRONG_DIRECTION";
 export type ConnectionStatus = "connected" | "reconnecting" | "offline";
-export type LiveOverlayFilter = "all" | "car" | "bike" | "person" | "violation" | "no_helmet" | "wrong_lane" | "overspeed";
+export type LiveOverlayFilter = "all" | "car" | "bike" | "bus" | "truck" | "person" | "violation" | "no_helmet" | "wrong_lane" | "overspeed";
 export type VehicleType = "bicycle" | "car" | "motorcycle" | "bus" | "truck" | "unknown";
 export type AnalyticsRange = "hour" | "today" | "week";
 export type VideoAnalysisStatus = "queued" | "processing" | "completed" | "failed";
@@ -70,6 +70,28 @@ export interface DashboardSummary {
   maxSpeed: number;
   currentFps: number;
   speedLimit: number;
+}
+
+export interface SystemHealth {
+  status: "healthy" | "degraded" | string;
+  pipelineRunning: boolean;
+  fps: number;
+  analysisFps: number;
+  sourceFps: number;
+  loopCount: number;
+  confidence: number;
+  showOverlays: boolean;
+  activeTracks: number;
+  activeDetections: number;
+  speedCalibration: string;
+  speedProcessingMode: string;
+  speedCalibrationQuality: number;
+  roadWidthMeters: number | null;
+  roadLengthMeters: number | null;
+  sourceMode: string;
+  browserConnected: boolean;
+  capabilities: Record<string, unknown>;
+  error: string | null;
 }
 
 export interface Camera {

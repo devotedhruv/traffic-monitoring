@@ -1,17 +1,19 @@
 import {
-  Activity, ArrowRight, BarChart3, BellRing, Camera, CheckCircle2, CircleGauge,
+  ArrowRight, BarChart3, BellRing, Camera, CheckCircle2, CircleGauge,
   Database, Gauge, MapPin, Play, Radio, ScanLine, ShieldCheck, Sparkles,
   Upload, Zap
 } from "lucide-react";
 import { useAuth } from "../app/AuthContext";
 import { Link } from "../components/ui/Link";
-import { ThemeToggle } from "../components/ui/ThemeToggle";
+import { LanguageToggle } from "../components/ui/LanguageToggle";
+import { BrandLogo } from "../components/ui/BrandLogo";
+import { PRODUCT_NAME } from "../lib/brand";
 
 function Brand() {
   return (
-    <Link to="/" className="flex items-center gap-2.5" aria-label="TrafficOps AI home">
-      <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-primary to-primary-hover text-white shadow-card"><Activity size={21} /></span>
-      <span className="text-[15px] font-extrabold tracking-[-0.03em]">TrafficOps <span className="text-primary">AI</span></span>
+    <Link to="/" className="flex items-center gap-2.5" aria-label={`${PRODUCT_NAME} home`}>
+      <BrandLogo variant="mark" className="h-10 w-12 rounded-xl bg-white p-0.5 shadow-card" />
+      <span className="text-[15px] font-extrabold tracking-[-0.03em] text-primary">Sadak<span className="text-danger">Drishti</span></span>
     </Link>
   );
 }
@@ -29,7 +31,7 @@ function PublicHeader() {
           <a href="#workflow" className="text-xs font-semibold text-secondary hover:text-primary">How it works</a>
         </nav>
         <div className="ml-auto flex items-center gap-2 md:ml-0">
-          <ThemeToggle />
+          <LanguageToggle />
           {!signedIn && <Link to="/sign-in" className="hidden h-10 items-center px-3 text-xs font-bold text-secondary hover:text-primary sm:inline-flex">Sign in</Link>}
           <Link to={signedIn ? "/app" : "/sign-up"} className="inline-flex h-10 items-center gap-2 rounded-xl bg-ink px-4 text-xs font-bold text-page hover:opacity-85">
             {signedIn ? "Open console" : "Get started"}<ArrowRight size={14} />
@@ -45,11 +47,11 @@ function TrafficPreview() {
     <div className="hero-preview relative mx-auto w-full max-w-[570px]" aria-label="Preview of the live traffic operations dashboard">
       <div className="absolute -left-12 top-20 h-40 w-40 rounded-full bg-primary/15 blur-3xl" />
       <div className="absolute -right-8 bottom-10 h-44 w-44 rounded-full bg-cyan/10 blur-3xl" />
-      <div className="relative overflow-hidden rounded-[26px] border border-white/10 bg-[#08120f] p-3 shadow-[0_35px_80px_-25px_rgb(0_0_0/0.55)] sm:p-4">
+      <div className="relative overflow-hidden rounded-[26px] border border-white/10 bg-[#245DB3] p-3 shadow-[0_35px_80px_-25px_rgb(36_93_179/0.48)] sm:p-4">
         <div className="flex items-center gap-2 border-b border-white/10 px-1 pb-3 text-white">
-          <span className="grid h-7 w-7 place-items-center rounded-lg bg-emerald-500"><Activity size={14} /></span>
-          <div><strong className="block text-[10px]">TrafficOps AI</strong><span className="block text-[7px] text-white/45">Live operations console</span></div>
-          <div className="ml-auto flex items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-1 text-[7px] font-bold text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> LIVE</div>
+          <BrandLogo variant="mark" className="h-7 w-8 rounded-lg bg-white p-0.5" />
+          <div><strong className="block text-[10px]">SadakDrishti</strong><span className="block text-[7px] text-white/45">Live operations console</span></div>
+          <div className="ml-auto flex items-center gap-1.5 rounded-full border border-[#BFDBFE]/25 bg-[#BFDBFE]/10 px-2 py-1 text-[7px] font-bold text-[#BFDBFE]"><span className="h-1.5 w-1.5 rounded-full bg-[#BFDBFE]" /> LIVE</div>
         </div>
         <div className="mt-3 grid grid-cols-3 gap-2">
           {[
@@ -58,36 +60,36 @@ function TrafficPreview() {
             <div key={label} className="rounded-xl border border-white/10 bg-white/[0.045] p-2.5">
               <span className="block text-[7px] font-semibold uppercase tracking-wider text-white/40">{label}</span>
               <strong className="mt-1.5 block text-sm tracking-tight text-white sm:text-base">{value}</strong>
-              <span className="text-[7px] text-emerald-300">{note}</span>
+              <span className="text-[7px] text-[#BFDBFE]">{note}</span>
             </div>
           ))}
         </div>
         <div className="mt-2 grid gap-2 sm:grid-cols-[1.55fr_1fr]">
-          <div className="relative min-h-[228px] overflow-hidden rounded-2xl border border-white/10 bg-[#101c18]">
+          <div className="relative min-h-[228px] overflow-hidden rounded-2xl border border-white/10 bg-[#0F2D4D]">
             <div className="absolute inset-x-3 top-3 z-10 flex items-center justify-between text-white">
-              <span className="flex items-center gap-1.5 text-[8px] font-bold"><Camera size={10} className="text-emerald-400" />North Junction</span>
+              <span className="flex items-center gap-1.5 text-[8px] font-bold"><Camera size={10} className="text-[#BFDBFE]" />North Junction</span>
               <span className="rounded-md bg-black/35 px-1.5 py-1 text-[7px] text-white/60">CAM 01</span>
             </div>
             <svg viewBox="0 0 420 245" className="absolute inset-0 h-full w-full" role="img" aria-label="AI tracking vehicles across an intersection">
               <defs>
-                <linearGradient id="road" x1="0" x2="1"><stop stopColor="#172a23"/><stop offset="1" stopColor="#0e1d18"/></linearGradient>
-                <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#6ee7b7" strokeOpacity=".045"/></pattern>
+                <linearGradient id="road" x1="0" x2="1"><stop stopColor="#173B66"/><stop offset="1" stopColor="#0F2D4D"/></linearGradient>
+                <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#BFDBFE" strokeOpacity=".06"/></pattern>
               </defs>
               <rect width="420" height="245" fill="url(#road)"/><rect width="420" height="245" fill="url(#grid)"/>
-              <path d="M-20 195C90 155 112 101 212 93C310 85 350 44 445 15" fill="none" stroke="#283c34" strokeWidth="94"/>
+              <path d="M-20 195C90 155 112 101 212 93C310 85 350 44 445 15" fill="none" stroke="#245DB3" strokeWidth="94"/>
               <path d="M-20 195C90 155 112 101 212 93C310 85 350 44 445 15" fill="none" stroke="#f8fafc" strokeOpacity=".22" strokeWidth="2" strokeDasharray="17 15"/>
               <path d="M48 245C92 174 142 151 216 133C298 113 337 74 381 -8" fill="none" stroke="#f8fafc" strokeOpacity=".12" strokeWidth="1"/>
-              <g className="vehicle-box"><rect x="119" y="126" width="57" height="35" rx="4" fill="#22c55e" fillOpacity=".08" stroke="#4ade80" strokeWidth="1.5"/><rect x="137" y="135" width="20" height="12" rx="3" fill="#d1fae5"/><text x="119" y="120" fill="#86efac" fontSize="8" fontWeight="700">CAR · 42 KM/H</text></g>
-              <g><rect x="257" y="68" width="62" height="39" rx="4" fill="#f59e0b" fillOpacity=".08" stroke="#fbbf24" strokeWidth="1.5"/><rect x="278" y="78" width="21" height="14" rx="3" fill="#fef3c7"/><text x="257" y="62" fill="#fde68a" fontSize="8" fontWeight="700">CAR · 61 KM/H</text></g>
-              <g><rect x="56" y="169" width="50" height="30" rx="4" fill="#22c55e" fillOpacity=".08" stroke="#4ade80"/><text x="56" y="164" fill="#86efac" fontSize="7">BIKE · 31 KM/H</text></g>
+              <g className="vehicle-box"><rect x="119" y="126" width="57" height="35" rx="4" fill="#BFDBFE" fillOpacity=".08" stroke="#BFDBFE" strokeWidth="1.5"/><rect x="137" y="135" width="20" height="12" rx="3" fill="#FFFFFF"/><text x="119" y="120" fill="#BFDBFE" fontSize="8" fontWeight="700">CAR · 42 KM/H</text></g>
+              <g><rect x="257" y="68" width="62" height="39" rx="4" fill="#DC143C" fillOpacity=".1" stroke="#FF6B7F" strokeWidth="1.5"/><rect x="278" y="78" width="21" height="14" rx="3" fill="#FF8395"/><text x="257" y="62" fill="#FF8395" fontSize="8" fontWeight="700">CAR · 61 KM/H</text></g>
+              <g><rect x="56" y="169" width="50" height="30" rx="4" fill="#BFDBFE" fillOpacity=".08" stroke="#BFDBFE"/><text x="56" y="164" fill="#BFDBFE" fontSize="7">BIKE · 31 KM/H</text></g>
             </svg>
-            <div className="absolute bottom-3 left-3 flex gap-2 text-[7px]"><span className="rounded-md bg-black/45 px-2 py-1.5 text-emerald-300">3 TRACKED</span><span className="rounded-md bg-black/45 px-2 py-1.5 text-white/55">15.2 FPS</span></div>
+            <div className="absolute bottom-3 left-3 flex gap-2 text-[7px]"><span className="rounded-md bg-black/45 px-2 py-1.5 text-[#BFDBFE]">3 TRACKED</span><span className="rounded-md bg-black/45 px-2 py-1.5 text-white/55">15.2 FPS</span></div>
           </div>
           <div className="space-y-2">
             <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-3">
-              <div className="flex items-center justify-between"><span className="text-[8px] font-semibold text-white/50">Traffic flow</span><BarChart3 size={11} className="text-emerald-400" /></div>
+              <div className="flex items-center justify-between"><span className="text-[8px] font-semibold text-white/50">Traffic flow</span><BarChart3 size={11} className="text-[#60A5FA]" /></div>
               <div className="mt-4 flex h-[62px] items-end gap-1.5">
-                {[34, 54, 42, 68, 58, 84, 70, 92, 77, 64].map((height, index) => <span key={index} className="flex-1 rounded-t-sm bg-emerald-400/70" style={{ height: `${height}%`, opacity: .45 + index * .045 }} />)}
+                {[34, 54, 42, 68, 58, 84, 70, 92, 77, 64].map((height, index) => <span key={index} className="flex-1 rounded-t-sm bg-[#60A5FA]/70" style={{ height: `${height}%`, opacity: .45 + index * .045 }} />)}
               </div>
               <div className="mt-2 flex justify-between text-[6px] text-white/30"><span>08:00</span><span>NOW</span></div>
             </div>
@@ -129,7 +131,7 @@ export function LandingPage() {
             <div className="max-w-[600px]">
               <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary-soft px-3 py-1.5 text-[10px] font-bold text-primary"><Sparkles size={13} />AI-powered road intelligence</div>
               <h1 className="mt-6 text-[42px] font-extrabold leading-[1.04] tracking-[-0.055em] sm:text-[58px] lg:text-[64px]">See every road.<br/><span className="text-primary">Understand every move.</span></h1>
-              <p className="mt-6 max-w-[540px] text-[15px] leading-7 text-secondary sm:text-base">TrafficOps AI turns ordinary camera feeds into a live operations layer—helping teams detect vehicles, monitor speed, investigate events, and make roads safer.</p>
+              <p className="mt-6 max-w-[540px] text-[15px] leading-7 text-secondary sm:text-base">SadakDrishti turns ordinary camera feeds into a live operations layer—helping teams detect vehicles, monitor speed, investigate events, and make roads safer.</p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                 <Link to={consolePath} className="primary-button h-13 px-6">{status === "authenticated" ? "Open operations console" : "Start monitoring"}<ArrowRight size={17} /></Link>
                 <a href="#workflow" className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-5 text-sm font-bold text-secondary shadow-sm hover:border-border-strong hover:text-ink"><span className="grid h-6 w-6 place-items-center rounded-full bg-primary-soft text-primary"><Play size={11} fill="currentColor" /></span>See how it works</a>
@@ -176,17 +178,17 @@ export function LandingPage() {
                 [BarChart3, "Act on the signal", "Review live status, explore vehicle history, and compare operational trends over time."]
               ].map(([Icon, title, text], index) => {
                 const StepIcon = Icon as typeof Camera;
-                return <article key={String(title)} className="relative rounded-2xl border border-border bg-surface p-6 text-center shadow-card"><span className="relative mx-auto grid h-16 w-16 place-items-center rounded-2xl border border-primary/20 bg-primary-soft text-primary"><StepIcon size={25} /><small className="absolute -right-2 -top-2 grid h-6 w-6 place-items-center rounded-full bg-primary text-[9px] font-bold text-white">{index + 1}</small></span><h3 className="mt-6 text-[15px] font-bold">{String(title)}</h3><p className="mx-auto mt-2 max-w-[280px] text-xs leading-5 text-muted">{String(text)}</p></article>;
+                return <article key={String(title)} className="relative rounded-2xl border border-border bg-surface p-6 text-center shadow-card"><span className="relative mx-auto grid h-16 w-16 place-items-center rounded-2xl border border-primary/20 bg-primary-soft text-primary"><StepIcon size={25} /><small className="absolute -right-2 -top-2 grid h-6 w-6 place-items-center rounded-full bg-primary text-[9px] font-bold text-on-primary">{index + 1}</small></span><h3 className="mt-6 text-[15px] font-bold">{String(title)}</h3><p className="mx-auto mt-2 max-w-[280px] text-xs leading-5 text-muted">{String(text)}</p></article>;
               })}
             </div>
           </div>
         </section>
 
         <section className="mx-auto max-w-[1240px] px-4 py-24 sm:px-6 lg:px-8">
-          <div className="relative overflow-hidden rounded-[28px] bg-[#091510] px-6 py-14 text-center text-white sm:px-12 sm:py-16">
+          <div className="relative overflow-hidden rounded-[28px] bg-[#245DB3] px-6 py-14 text-center text-white sm:px-12 sm:py-16">
             <div className="landing-grid-dark absolute inset-0" />
-            <div className="absolute left-1/2 top-0 h-60 w-60 -translate-x-1/2 rounded-full bg-emerald-500/20 blur-3xl" />
-            <div className="relative mx-auto max-w-2xl"><span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-emerald-500 text-white"><Activity size={23} /></span><h2 className="mt-6 text-3xl font-extrabold tracking-[-0.04em] sm:text-4xl">Make every camera count.</h2><p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-white/55">Bring detection, speed insights, vehicle history, and video analysis into one focused traffic operations console.</p><Link to={consolePath} className="mt-8 inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-white px-6 text-sm font-bold text-[#091510] hover:bg-emerald-50">{status === "authenticated" ? "Open TrafficOps" : "Create your account"}<ArrowRight size={16} /></Link></div>
+            <div className="absolute left-1/2 top-0 h-60 w-60 -translate-x-1/2 rounded-full bg-[#DC143C]/20 blur-3xl" />
+            <div className="relative mx-auto max-w-2xl"><BrandLogo variant="logo" className="mx-auto h-24 w-36 rounded-2xl bg-white p-2 shadow-panel" /><h2 className="mt-6 text-3xl font-extrabold tracking-[-0.04em] sm:text-4xl">Make every camera count.</h2><p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-white/60">Bring detection, speed insights, vehicle history, and video analysis into one focused traffic operations console.</p><Link to={consolePath} className="mt-8 inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-white px-6 text-sm font-bold text-[#245DB3] hover:bg-[#E8F1FA]">{status === "authenticated" ? "Open SadakDrishti" : "Create your account"}<ArrowRight size={16} /></Link></div>
           </div>
         </section>
       </main>

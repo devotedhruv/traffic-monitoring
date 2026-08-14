@@ -236,7 +236,7 @@ export function WebcamConnector({ cameraId, onSourceChanged }: {
         <div className="relative grid aspect-video min-h-52 place-items-center overflow-hidden rounded-xl border border-border bg-black" onClick={addPoint} role="presentation">
           <video ref={videoRef} muted playsInline className="h-full w-full object-contain" />
           {!connected && <div className="absolute inset-0 grid place-items-center p-5 text-center text-white/65"><div><Camera className="mx-auto mb-2" size={28} /><p className="text-xs font-semibold text-white">Connect this browser's webcam</p><p className="mt-1 text-[10px]">Frames stay live and are sent to your authenticated backend session.</p></div></div>}
-          {connected && calibration.sourcePoints.map((point: NormalizedPoint, index: number) => <span key={`${point.x}-${point.y}-${index}`} className="pointer-events-none absolute grid h-7 w-7 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 border-white bg-primary text-[10px] font-extrabold text-white shadow" style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}>{index + 1}</span>)}
+          {connected && calibration.sourcePoints.map((point: NormalizedPoint, index: number) => <span key={`${point.x}-${point.y}-${index}`} className="pointer-events-none absolute grid h-7 w-7 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 border-white bg-primary text-[10px] font-extrabold text-on-primary shadow" style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}>{index + 1}</span>)}
         </div>
         <p className="mt-2 text-[10px] text-muted">For calibrated speed, click road corners in order: far-left, far-right, near-right, near-left.</p>
       </div>

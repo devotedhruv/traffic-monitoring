@@ -1,6 +1,10 @@
 import threading
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
+import cv2
 import numpy as np
 
 from services.plate_ocr import PlateAggregator
@@ -15,6 +19,27 @@ from web.violations import (
 
 
 class LiveRuntimeTests(unittest.TestCase):
+    def test_first_detection_snapshot_preserves_the_detected_frame_crop(self):
+        runtime = TrafficRuntime()
+        frame = np.zeros((100, 160, 3), dtype=np.uint8)
+        frame[30:80, 50:110] = (20, 80, 180)
+
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "web.runtime.PROJECT_ROOT", Path(temporary)
+        ):
+            stored = runtime._save_detection_snapshot(
+                frame, (50, 30, 110, 80), 48, "motorcycle", 0,
+            )
+
+            self.assertIsNotNone(stored)
+            snapshot = Path(stored)
+            self.assertTrue(snapshot.is_file())
+            self.assertTrue(snapshot.is_relative_to(Path(temporary) / "output" / "detections"))
+            decoded = cv2.imread(str(snapshot))
+            self.assertIsNotNone(decoded)
+            self.assertGreater(decoded.shape[0], 50)
+            self.assertGreater(decoded.shape[1], 60)
+
     def test_plate_text_requires_consistent_valid_multi_frame_reads(self):
         aggregator = PlateAggregator(minimum_confirmed_observations=2)
 
@@ -174,6 +199,8 @@ class LiveRuntimeTests(unittest.TestCase):
             4, "bus", 0.88, (41, 2, 55, 18), 22, "NORMAL", ("WRONG_LANE",)
         )
         overspeed = FrameAnnotation(5, "car", 0.92, (58, 2, 70, 18), 68, "OVERSPEED")
+        bus = FrameAnnotation(7, "bus", 0.91, (72, 2, 84, 18), 25, "NORMAL")
+        truck = FrameAnnotation(8, "truck", 0.89, (86, 2, 99, 18), 21, "NORMAL")
 
         runtime.set_overlay_filters(["car"])
         self.assertTrue(runtime._annotation_is_visible(car))
@@ -197,6 +224,12 @@ class LiveRuntimeTests(unittest.TestCase):
         runtime.set_overlay_filters(["overspeed"])
         self.assertTrue(runtime._annotation_is_visible(overspeed))
         self.assertFalse(runtime._annotation_is_visible(no_helmet))
+        runtime.set_overlay_filters(["bus"])
+        self.assertTrue(runtime._annotation_is_visible(bus))
+        self.assertFalse(runtime._annotation_is_visible(truck))
+        runtime.set_overlay_filters(["truck"])
+        self.assertTrue(runtime._annotation_is_visible(truck))
+        self.assertFalse(runtime._annotation_is_visible(bus))
 
     def test_missing_helmet_weights_are_reported_without_crashing(self):
         specialist = HelmetSpecialist("/missing/helmet-best.pt", 0.35)

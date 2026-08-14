@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { cx } from "../../lib/format";
 import { AppHeader } from "./AppHeader";
 import { AppSidebar } from "./AppSidebar";
@@ -13,7 +13,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
     });
   };
   return (
-    <div className="min-h-screen text-ink">
+    <div className="min-h-screen text-ink" style={{ "--trafficops-sidebar-width": collapsed ? "82px" : "252px" } as CSSProperties}>
       <AppSidebar collapsed={collapsed} mobileOpen={mobileOpen} onCollapse={toggleCollapse} onClose={() => setMobileOpen(false)} />
       <AppHeader collapsed={collapsed} onMenu={() => setMobileOpen(true)} />
       <main className={cx("relative transition-[margin] duration-200", collapsed ? "lg:ml-[82px]" : "lg:ml-[252px]")}>

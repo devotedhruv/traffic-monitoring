@@ -10,6 +10,8 @@ const categories = [
   { key: "all", name: "All", color: "bg-success" },
   { key: "car", name: "Car", color: "bg-info" },
   { key: "bike", name: "Bike", color: "bg-warning" },
+  { key: "bus", name: "Bus", color: "bg-success" },
+  { key: "truck", name: "Truck", color: "bg-cyan" },
   { key: "person", name: "Person", color: "bg-purple" },
   { key: "violation", name: "Violation", color: "bg-danger" },
   { key: "no_helmet", name: "No helmet", color: "bg-warning" },

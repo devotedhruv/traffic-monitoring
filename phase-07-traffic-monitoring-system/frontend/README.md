@@ -1,6 +1,6 @@
-# TrafficOps Web Frontend
+# SadakDrishti Web Frontend
 
-TrafficOps is the browser dashboard for the AI traffic-monitoring pipeline in the parent project. It provides a responsive control-room interface for a live annotated camera feed, vehicle metrics, speed violations, detection history, analytics, and isolated analysis from a locally uploaded video clip.
+SadakDrishti is the browser dashboard for the AI traffic-monitoring pipeline in the parent project. It provides a responsive control-room interface for a live annotated camera feed, vehicle metrics, speed violations, detection history, analytics, and isolated analysis from a locally uploaded video clip.
 
 The Python project now includes a FastAPI integration in `../web` with REST, WebSocket, and MJPEG endpoints. The frontend can use that service or run independently in demo mode.
 

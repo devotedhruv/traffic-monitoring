@@ -105,6 +105,34 @@ class TrafficApiTests(unittest.TestCase):
             api.vehicle(99999)
         self.assertEqual(error.exception.status_code, 404)
 
+    def test_vehicle_snapshot_is_serialized_and_served_from_detection_storage(self):
+        root = Path(self.temp.name)
+        snapshot_directory = root / "output" / "detections"
+        snapshot_directory.mkdir(parents=True)
+        snapshot_path = snapshot_directory / "vehicle-48.jpg"
+        cv2.imwrite(str(snapshot_path), np.full((20, 30, 3), 120, dtype=np.uint8))
+        vehicle_id = database.save_vehicle(
+            "UNKNOWN", None, "NORMAL", 48, "motorcycle", snapshot_url=str(snapshot_path),
+        )
+
+        item = database.get_vehicle(vehicle_id)
+        self.assertEqual(item["snapshotUrl"], f"/api/vehicles/{vehicle_id}/snapshot")
+        with patch.object(api, "PROJECT_ROOT", root):
+            response = api.vehicle_snapshot(vehicle_id)
+        self.assertEqual(Path(response.path), snapshot_path)
+
+    def test_vehicle_snapshot_rejects_files_outside_detection_storage(self):
+        outside = Path(self.temp.name) / "outside.jpg"
+        outside.write_bytes(b"not public")
+        vehicle_id = database.save_vehicle(
+            "UNKNOWN", None, "NORMAL", 49, "car", snapshot_url=str(outside),
+        )
+
+        with patch.object(api, "PROJECT_ROOT", Path(self.temp.name)):
+            with self.assertRaises(HTTPException) as error:
+                api.vehicle_snapshot(vehicle_id)
+        self.assertEqual(error.exception.status_code, 404)
+
     def test_confirmed_plate_is_correlated_with_the_saved_vehicle(self):
         vehicle_id = database.save_vehicle("UNKNOWN", 41.5, "NORMAL", 88, "car")
         database.update_vehicle_plate(

@@ -366,6 +366,14 @@ def update_vehicle_measurement(record_id: int, speed: float, status: str) -> Non
         )
 
 
+def get_vehicle_snapshot_path(vehicle_id: int) -> str | None:
+    with _connect() as connection:
+        row = connection.execute(
+            "SELECT snapshot_url FROM vehicles WHERE id = ?", (vehicle_id,)
+        ).fetchone()
+    return row["snapshot_url"] if row else None
+
+
 def update_vehicle_plate(
     record_id: int,
     plate: str,
@@ -587,8 +595,9 @@ def _serialize_violation(row: sqlite3.Row) -> dict[str, Any]:
             row["vehicle_status"] if "vehicle_status" in columns else None
         ),
         "vehicleSnapshotUrl": (
-            row["vehicle_snapshot_url"]
-            if "vehicle_snapshot_url" in columns else None
+            f"/api/vehicles/{row['vehicle_id']}/snapshot"
+            if "vehicle_snapshot_url" in columns and row["vehicle_snapshot_url"]
+            and row["vehicle_id"] is not None else None
         ),
     }
 
@@ -1168,7 +1177,9 @@ def _serialize(row: sqlite3.Row) -> dict[str, Any]:
         "status": row["status"],
         "detectedAt": detected,
         "cameraId": row["camera_id"] or CAMERA_ID,
-        "snapshotUrl": row["snapshot_url"],
+        "snapshotUrl": (
+            f"/api/vehicles/{row['id']}/snapshot" if row["snapshot_url"] else None
+        ),
     }
 
 

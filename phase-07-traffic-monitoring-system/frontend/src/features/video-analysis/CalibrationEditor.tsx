@@ -100,7 +100,7 @@ export function CalibrationEditor({
         {enabled && points.map((point, index) => (
           <span
             key={`${point.x}-${point.y}-${index}`}
-            className="pointer-events-none absolute grid h-7 w-7 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 border-white bg-primary text-[10px] font-black text-white shadow-lg"
+            className="pointer-events-none absolute grid h-7 w-7 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 border-white bg-primary text-[10px] font-black text-on-primary shadow-lg"
             style={{ left: percentage(point.x), top: percentage(point.y) }}
           >
             {index + 1}

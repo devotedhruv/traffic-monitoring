@@ -1,11 +1,16 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { usePathname } from "../app/router";
+import { usePathname, useSearch } from "../app/router";
 import { Link } from "../components/ui/Link";
 
 function RouterProbe() {
   const pathname = usePathname();
   return <><Link to="/history">History</Link><output>{pathname}</output></>;
+}
+
+function SearchProbe() {
+  const search = useSearch();
+  return <><Link to="/app?panel=settings">Settings</Link><output>{search}</output></>;
 }
 
 describe("client router", () => {
@@ -30,5 +35,12 @@ describe("client router", () => {
     window.history.pushState(null, "", "/analytics");
     fireEvent.popState(window);
     expect(screen.getByRole("status")).toHaveTextContent("/analytics");
+  });
+
+  it("reacts to query-only Settings navigation", () => {
+    window.history.replaceState(null, "", "/app");
+    render(<SearchProbe />);
+    fireEvent.click(screen.getByRole("link", { name: "Settings" }));
+    expect(screen.getByRole("status")).toHaveTextContent("?panel=settings");
   });
 });

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import math
+import importlib.util
 import shutil
 import subprocess
 import threading
@@ -27,6 +29,8 @@ class OCREngine(Protocol):
 
 class UnavailableOCREngine:
     available = False
+    backend = "none"
+    languages = ""
 
     def read(self, image: np.ndarray) -> list[tuple[str, float]]:
         return []
@@ -34,6 +38,8 @@ class UnavailableOCREngine:
 
 class EasyOCREngine:
     def __init__(self, languages: tuple[str, ...] = ("en",), gpu: bool = False):
+        self.backend = "easyocr"
+        self.languages = "+".join(languages)
         try:
             import easyocr
 
@@ -52,9 +58,30 @@ class EasyOCREngine:
 
 class TesseractOCREngine:
     def __init__(self, languages: str = "eng", command: str = "tesseract"):
-        self.languages = languages
+        self.backend = "tesseract"
         self.command = shutil.which(command) if command else None
-        self.available = self.command is not None
+        self.languages = self._available_languages(languages)
+        self.available = self.command is not None and bool(self.languages)
+
+    def _available_languages(self, requested: str) -> str:
+        if self.command is None:
+            return ""
+        wanted = [language.strip() for language in requested.split("+") if language.strip()]
+        try:
+            completed = subprocess.run(
+                [self.command, "--list-langs"], stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, timeout=5, check=False, text=True,
+            )
+            installed = {line.strip() for line in completed.stdout.splitlines()[1:] if line.strip()}
+        except (OSError, subprocess.TimeoutExpired):
+            installed = set()
+        selected = [language for language in wanted if language in installed]
+        if not selected and "eng" in installed:
+            selected = ["eng"]
+        missing = [language for language in wanted if language not in installed]
+        if missing:
+            log.warning("Tesseract language packs unavailable: %s", ", ".join(missing))
+        return "+".join(selected)
 
     def read(self, image: np.ndarray) -> list[tuple[str, float]]:
         if self.command is None or image.size == 0:
@@ -103,6 +130,7 @@ class _Observation:
     text: str
     confidence: float
     timestamp: float
+    crop_quality: float = 1.0
 
 
 class PlateAggregator:
@@ -113,22 +141,30 @@ class PlateAggregator:
         possible_threshold: float = 0.5,
         minimum_confirmed_observations: int = 2,
         history_size: int = 12,
+        recency_half_life_seconds: float = 4.0,
     ):
         self.validator = validator or PlateValidator()
         self.confirmed_threshold = confirmed_threshold
         self.possible_threshold = possible_threshold
         self.minimum_confirmed_observations = minimum_confirmed_observations
+        self.recency_half_life_seconds = max(0.1, recency_half_life_seconds)
         self._observations: dict[int, deque[_Observation]] = defaultdict(
             lambda: deque(maxlen=history_size)
         )
         self._lock = threading.Lock()
 
-    def add(self, tracking_id: int, text: str, confidence: float, timestamp: float) -> PlateRead:
+    def add(
+        self, tracking_id: int, text: str, confidence: float, timestamp: float,
+        crop_quality: float = 1.0,
+    ) -> PlateRead:
         valid, normalized = self.validator.validate(text)
         if valid:
             with self._lock:
                 self._observations[tracking_id].append(
-                    _Observation(normalized, max(0.0, min(1.0, confidence)), timestamp)
+                    _Observation(
+                        normalized, max(0.0, min(1.0, confidence)), timestamp,
+                        max(0.0, min(1.0, crop_quality)),
+                    )
                 )
         return self.result(tracking_id)
 
@@ -140,13 +176,20 @@ class PlateAggregator:
         counts = Counter(observation.text for observation in observations)
         weighted: dict[str, float] = defaultdict(float)
         confidence_totals: dict[str, float] = defaultdict(float)
+        recency_totals: dict[str, float] = defaultdict(float)
+        latest_timestamp = max(observation.timestamp for observation in observations)
         for observation in observations:
-            weighted[observation.text] += max(0.05, observation.confidence)
-            confidence_totals[observation.text] += observation.confidence
+            age = max(0.0, latest_timestamp - observation.timestamp)
+            recency = math.pow(0.5, age / self.recency_half_life_seconds)
+            quality_weight = 0.55 + 0.45 * observation.crop_quality
+            effective_confidence = observation.confidence * quality_weight
+            weighted[observation.text] += max(0.02, effective_confidence) * recency
+            confidence_totals[observation.text] += effective_confidence * recency
+            recency_totals[observation.text] += recency
         winner = max(weighted, key=weighted.get)
         winner_count = counts[winner]
-        mean_confidence = confidence_totals[winner] / winner_count
-        consistency = winner_count / len(observations)
+        mean_confidence = confidence_totals[winner] / max(recency_totals[winner], 1e-9)
+        consistency = weighted[winner] / max(sum(weighted.values()), 1e-9)
         aggregate_confidence = mean_confidence * (0.65 + 0.35 * consistency)
         if aggregate_confidence >= self.confirmed_threshold and winner_count >= self.minimum_confirmed_observations:
             status = "CONFIRMED"
@@ -177,19 +220,24 @@ class PlateOCRService:
         self._last_frame: dict[int, int] = {}
         self._pending: dict[int, Future[list[tuple[str, float]]]] = {}
         self._timestamps: dict[int, float] = {}
+        self._qualities: dict[int, float] = {}
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="plate-ocr")
 
     @property
     def available(self) -> bool:
         return bool(self.engine.available)
 
-    def submit(self, tracking_id: int, image: np.ndarray, frame_index: int, timestamp: float) -> None:
+    def submit(
+        self, tracking_id: int, image: np.ndarray, frame_index: int, timestamp: float,
+        crop_quality: float = 1.0,
+    ) -> None:
         if not self.available or tracking_id in self._pending:
             return
         if frame_index - self._last_frame.get(tracking_id, -self.interval_frames) < self.interval_frames:
             return
         self._last_frame[tracking_id] = frame_index
         self._timestamps[tracking_id] = timestamp
+        self._qualities[tracking_id] = max(0.0, min(1.0, crop_quality))
         self._pending[tracking_id] = self._executor.submit(self.engine.read, image.copy())
 
     def result(self, tracking_id: int) -> PlateRead:
@@ -197,13 +245,14 @@ class PlateOCRService:
         if future is not None and future.done():
             self._pending.pop(tracking_id, None)
             timestamp = self._timestamps.pop(tracking_id, 0.0)
+            crop_quality = self._qualities.pop(tracking_id, 1.0)
             try:
                 candidates = future.result()
             except Exception:
                 log.exception("OCR worker failed for track %s", tracking_id)
                 candidates = []
             for text, confidence in candidates:
-                self.aggregator.add(tracking_id, text, confidence, timestamp)
+                self.aggregator.add(tracking_id, text, confidence, timestamp, crop_quality)
         return self.aggregator.result(tracking_id)
 
     def close(self) -> None:
@@ -218,7 +267,31 @@ def create_ocr_engine(
 ) -> OCREngine:
     normalized = name.strip().lower()
     if normalized == "easyocr":
-        return EasyOCREngine(gpu=gpu)
+        easy_languages = tuple(
+            "ne" if language == "nep" else language
+            for language in languages.split("+") if language
+        )
+        return EasyOCREngine(languages=easy_languages or ("en",), gpu=gpu)
     if normalized == "tesseract":
         return TesseractOCREngine(languages=languages, command=command)
     return UnavailableOCREngine()
+
+
+def ocr_dependency_status(name: str, command: str = "tesseract", languages: str = "eng") -> dict[str, object]:
+    """Check configured OCR dependencies without loading EasyOCR models or crashing startup."""
+    normalized = name.strip().lower()
+    if normalized == "tesseract":
+        engine = TesseractOCREngine(languages=languages, command=command)
+        return {
+            "backend": "tesseract", "available": engine.available,
+            "languages": [item for item in engine.languages.split("+") if item],
+            "executable": bool(engine.command),
+        }
+    if normalized == "easyocr":
+        available = importlib.util.find_spec("easyocr") is not None
+        return {
+            "backend": "easyocr", "available": available,
+            "languages": ["ne" if item == "nep" else item for item in languages.split("+") if item],
+            "executable": None,
+        }
+    return {"backend": "none", "available": False, "languages": [], "executable": None}

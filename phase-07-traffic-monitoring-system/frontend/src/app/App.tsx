@@ -5,7 +5,8 @@ import { NotFoundPage } from "../pages/NotFoundPage";
 import { LoadingSkeleton } from "../components/ui/States";
 import { LiveProvider } from "./LiveContext";
 import { ThemeProvider } from "./ThemeContext";
-import { navigate, usePathname } from "./router";
+import { LanguageProvider } from "./LanguageContext";
+import { navigate, usePathname, useSearch } from "./router";
 import { AuthProvider, useAuth } from "./AuthContext";
 import { AlertNotificationManager } from "../features/alerts/AlertNotificationManager";
 
@@ -20,19 +21,21 @@ const AlertsPage = lazy(() => import("../pages/AlertsPage").then((module) => ({ 
 const ReportsPage = lazy(() => import("../pages/ReportsPage").then((module) => ({ default: module.ReportsPage })));
 const AnalyticsPage = lazy(() => import("../pages/AnalyticsPage").then((module) => ({ default: module.AnalyticsPage })));
 const UploadAnalysisPage = lazy(() => import("../pages/UploadAnalysisPage").then((module) => ({ default: module.UploadAnalysisPage })));
+const SettingsPage = lazy(() => import("../pages/SettingsPage").then((module) => ({ default: module.SettingsPage })));
 
 function RedirectToSignIn({ from }: { from: string }) {
   useEffect(() => navigate(`/sign-in?next=${encodeURIComponent(from)}`), [from]);
   return <div className="mx-auto mt-24 max-w-sm"><LoadingSkeleton className="h-48" /></div>;
 }
 
-function Application({ pathname }: { pathname: string }) {
+function Application({ pathname, search }: { pathname: string; search: string }) {
   const { status } = useAuth();
   if (status === "loading") return <div className="mx-auto mt-24 max-w-md px-5"><LoadingSkeleton className="h-64" /></div>;
   if (status === "anonymous") return <RedirectToSignIn from={`${window.location.pathname}${window.location.search}`} />;
 
+  const settingsPanel = pathname === "/app" && new URLSearchParams(search).get("panel") === "settings";
   const page = pathname === "/app"
-    ? <DashboardPage />
+    ? settingsPanel ? <SettingsPage /> : <DashboardPage />
     : pathname === "/app/history"
       ? <HistoryPage />
       : pathname === "/app/violations"
@@ -52,13 +55,14 @@ function Application({ pathname }: { pathname: string }) {
 
 function CurrentPage() {
   const pathname = usePathname().replace(/\/+$/, "") || "/";
+  const search = useSearch();
   if (pathname === "/") return <LandingPage />;
   if (pathname === "/sign-in") return <AuthPage mode="signin" />;
   if (pathname === "/sign-up") return <AuthPage mode="signup" />;
-  if (pathname === "/app" || pathname.startsWith("/app/")) return <Application pathname={pathname} />;
+  if (pathname === "/app" || pathname.startsWith("/app/")) return <Application pathname={pathname} search={search} />;
   return <NotFoundPage />;
 }
 
 export function App() {
-  return <ThemeProvider><QueryClientProvider client={queryClient}><AuthProvider><CurrentPage /></AuthProvider></QueryClientProvider></ThemeProvider>;
+  return <ThemeProvider><LanguageProvider><QueryClientProvider client={queryClient}><AuthProvider><CurrentPage /></AuthProvider></QueryClientProvider></LanguageProvider></ThemeProvider>;
 }

@@ -1,6 +1,6 @@
 import { config, endpoints } from "../lib/config";
 import { getMockAnalytics, getMockSummary, getMockVehicles, mockVehicles } from "../mocks/data";
-import type { AlertDetail, AlertQuery, AlertSummary, AnalyticsData, AnalyticsRange, AuthResponse, AuthUser, Camera, CameraSettings, DashboardSummary, LaneRule, LiveCameraCalibration, PaginatedAlerts, PaginatedVehicles, PaginatedViolations, ReportFilters, ReportFrequency, ReportQuery, ReportRecord, ReportSchedule, ReportSummary, ReportTemplate, ReportType, VehicleDetection, VehicleQuery, VideoAnalysisJob, VideoAnalysisOptions, ViolationCapabilities, ViolationQuery, ViolationSummary, ViolationType } from "../types";
+import type { AlertDetail, AlertQuery, AlertSummary, AnalyticsData, AnalyticsRange, AuthResponse, AuthUser, Camera, CameraSettings, DashboardSummary, LaneRule, LiveCameraCalibration, PaginatedAlerts, PaginatedVehicles, PaginatedViolations, ReportFilters, ReportFrequency, ReportQuery, ReportRecord, ReportSchedule, ReportSummary, ReportTemplate, ReportType, SystemHealth, VehicleDetection, VehicleQuery, VideoAnalysisJob, VideoAnalysisOptions, ViolationCapabilities, ViolationQuery, ViolationSummary, ViolationType } from "../types";
 
 export class ApiError extends Error {
   status: number;
@@ -125,6 +125,13 @@ export const api = {
   }),
   signOut: () => request<void>(endpoints.signOut, { method: "POST" }),
   getMe: () => request<AuthResponse>(endpoints.me),
+  getHealth: () => config.useMocks ? Promise.resolve<SystemHealth>({
+    status: "healthy", pipelineRunning: true, fps: 29.8, analysisFps: 12, sourceFps: 30,
+    loopCount: 0, confidence: 0.65, showOverlays: true, activeTracks: 7, activeDetections: 57,
+    speedCalibration: "DEMO", speedProcessingMode: "DEMO", speedCalibrationQuality: 0,
+    roadWidthMeters: null, roadLengthMeters: null, sourceMode: "demo", browserConnected: false,
+    capabilities: {}, error: null
+  }) : request<SystemHealth>(endpoints.health),
   getSummary: () => config.useMocks ? getMockSummary() : request<DashboardSummary>(endpoints.summary),
   getVehicles: (query: VehicleQuery) => config.useMocks ? getMockVehicles(query) : request<PaginatedVehicles>(`${endpoints.vehicles}?${queryString(query)}`),
   getVehicle: (id: number) => config.useMocks

@@ -190,7 +190,7 @@ export function UploadAnalysisPage() {
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_82%_30%,rgb(var(--color-primary)/.13),transparent_18rem)]" />
             <div className="relative z-10 max-w-[670px]">
               <span className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary-soft px-3 py-1.5 text-[10px] font-bold uppercase tracking-[.08em] text-primary"><Sparkles size={13} />Step {currentStep} of 3</span>
-              <h1 className="mt-4 max-w-[620px] text-[28px] font-extrabold leading-tight tracking-[-.04em] sm:text-[34px]">Turn any road video into traffic insights.</h1>
+              <h1 className="mt-4 max-w-[620px] text-[28px] font-extrabold leading-tight tracking-[-.04em] text-danger sm:text-[34px]">Turn any road video into traffic insights.</h1>
               <p className="mt-3 max-w-[620px] text-sm leading-6 text-muted">Upload a road-video clip and calibrate its visible road plane. Ground-plane tracking reports vehicle type, trajectory, measured speed, line crossings, and possible violations.</p>
               <div className="mt-6 flex flex-wrap gap-2">
                 <span className="trust-chip"><ShieldCheck />Temporary processing<small>Deleted after analysis</small></span>
@@ -201,7 +201,7 @@ export function UploadAnalysisPage() {
             <div className="pointer-events-none absolute bottom-5 right-7 hidden h-44 w-56 items-end justify-center lg:flex">
               <div className="absolute bottom-0 h-32 w-24 [clip-path:polygon(42%_0,58%_0,100%_100%,0_100%)] bg-primary/15" />
               <div className="absolute bottom-0 h-32 w-px bg-primary/70" />
-              <div className="absolute bottom-12 grid h-20 w-20 place-items-center rounded-[28px] border border-primary/30 bg-primary text-white shadow-card"><UploadCloud size={36} /></div>
+              <div className="absolute bottom-12 grid h-20 w-20 place-items-center rounded-[28px] border border-primary/30 bg-primary text-on-primary shadow-card"><UploadCloud size={36} /></div>
               <BarChart3 className="absolute right-0 top-5 text-primary/50" size={48} />
             </div>
           </section>

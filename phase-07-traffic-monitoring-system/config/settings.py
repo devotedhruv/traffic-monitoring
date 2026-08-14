@@ -1,24 +1,57 @@
 """Runtime configuration with environment-variable overrides."""
 
 import os
+import logging
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+log = logging.getLogger("sadakdrishti.settings")
+
+
+def _optional_existing_model(value: str, label: str) -> str:
+    """Ignore a missing optional custom weight without disabling the bundled detector."""
+    configured = value.strip()
+    if not configured:
+        return ""
+    candidate = Path(configured).expanduser()
+    if not candidate.is_absolute():
+        candidate = PROJECT_ROOT / candidate
+    if candidate.is_file():
+        return str(candidate.resolve())
+    log.warning("Configured %s model is missing: %s; ignoring this custom override", label, candidate)
+    return ""
+
+
+def _required_model_or_default(value: str, fallback: Path, label: str) -> str:
+    configured = _optional_existing_model(value, label)
+    if configured:
+        return configured
+    if not fallback.is_file():
+        raise FileNotFoundError(f"Bundled {label} model is missing: {fallback}")
+    return str(fallback.resolve())
 
 SPEED_LIMIT = float(os.getenv("TRAFFIC_SPEED_LIMIT", "50"))
 VIDEO_SOURCE = os.getenv("TRAFFIC_VIDEO_SOURCE", str(PROJECT_ROOT / "videos" / "traffic.mp4"))
 VIDEO_PATH = VIDEO_SOURCE
-MODEL_PATH = os.getenv("TRAFFIC_MODEL_PATH", str(PROJECT_ROOT / "models" / "yolo11s.pt"))
-_DEFAULT_LIVE_MODEL = PROJECT_ROOT / "models" / "yolov8n.pt"
-LIVE_MODEL_PATH = os.getenv(
-    "TRAFFIC_LIVE_MODEL_PATH",
-    str(_DEFAULT_LIVE_MODEL if _DEFAULT_LIVE_MODEL.exists() else Path(MODEL_PATH)),
+VEHICLE_MODEL_PATH = _optional_existing_model(
+    os.getenv("TRAFFIC_VEHICLE_MODEL_PATH", ""), "vehicle",
 )
-PLATE_MODEL_PATH = os.getenv("TRAFFIC_PLATE_MODEL_PATH", "")
+MODEL_PATH = VEHICLE_MODEL_PATH or _required_model_or_default(
+    os.getenv("TRAFFIC_MODEL_PATH", ""), PROJECT_ROOT / "models" / "yolo11s.pt", "analysis vehicle",
+)
+_DEFAULT_LIVE_MODEL = PROJECT_ROOT / "models" / "yolov8n.pt"
+LIVE_MODEL_PATH = VEHICLE_MODEL_PATH or _required_model_or_default(
+    os.getenv("TRAFFIC_LIVE_MODEL_PATH", ""),
+    _DEFAULT_LIVE_MODEL if _DEFAULT_LIVE_MODEL.exists() else Path(MODEL_PATH),
+    "live vehicle",
+)
+PLATE_MODEL_PATH = _optional_existing_model(
+    os.getenv("TRAFFIC_PLATE_MODEL_PATH", ""), "plate",
+)
 PLATE_OCR_ENGINE = os.getenv("TRAFFIC_PLATE_OCR_ENGINE", "tesseract").strip().lower()
 if PLATE_OCR_ENGINE not in {"tesseract", "easyocr", "none"}:
     PLATE_OCR_ENGINE = "none"
-PLATE_OCR_LANGUAGES = os.getenv("TRAFFIC_PLATE_OCR_LANGUAGES", "eng").strip() or "eng"
+PLATE_OCR_LANGUAGES = os.getenv("TRAFFIC_PLATE_OCR_LANGUAGES", "nep+eng").strip() or "eng"
 PLATE_CONFIDENCE = min(
     0.95, max(0.05, float(os.getenv("TRAFFIC_PLATE_CONFIDENCE", "0.35")))
 )
@@ -28,9 +61,14 @@ PLATE_MIN_QUALITY = min(
 PLATE_SAMPLE_SECONDS = min(
     10.0, max(0.25, float(os.getenv("TRAFFIC_PLATE_SAMPLE_SECONDS", "0.75")))
 )
-HELMET_MODEL_PATH = os.getenv("TRAFFIC_HELMET_MODEL_PATH", "")
+HELMET_MODEL_PATH = _optional_existing_model(
+    os.getenv("TRAFFIC_HELMET_MODEL_PATH", ""), "helmet",
+)
+HELMET_CONFIDENCE = min(
+    0.95, max(0.05, float(os.getenv("TRAFFIC_HELMET_CONFIDENCE", "0.35")))
+)
 LIVE_HELMET_CONFIDENCE = min(
-    0.95, max(0.05, float(os.getenv("TRAFFIC_LIVE_HELMET_CONFIDENCE", "0.35")))
+    0.95, max(0.05, float(os.getenv("TRAFFIC_LIVE_HELMET_CONFIDENCE", str(HELMET_CONFIDENCE))))
 )
 LIVE_HELMET_CONFIRMATIONS = min(
     12, max(2, int(os.getenv("TRAFFIC_LIVE_HELMET_CONFIRMATIONS", "3")))
@@ -63,7 +101,12 @@ if TRACKER_CONFIG not in {"botsort.yaml", "bytetrack.yaml"}:
 ANALYSIS_FPS = min(30.0, max(5.0, float(os.getenv("TRAFFIC_ANALYSIS_FPS", "15"))))
 DETECTOR_IMAGE_SIZE = min(1280, max(640, int(os.getenv("TRAFFIC_DETECTOR_IMAGE_SIZE", "960"))))
 LIVE_IMAGE_SIZE = min(960, max(320, int(os.getenv("TRAFFIC_LIVE_IMAGE_SIZE", "640"))))
-LIVE_CONFIDENCE = min(0.9, max(0.05, float(os.getenv("TRAFFIC_LIVE_CONFIDENCE", "0.10"))))
+VEHICLE_CONFIDENCE = min(
+    0.9, max(0.05, float(os.getenv("TRAFFIC_VEHICLE_CONFIDENCE", "0.10")))
+)
+LIVE_CONFIDENCE = min(
+    0.9, max(0.05, float(os.getenv("TRAFFIC_LIVE_CONFIDENCE", str(VEHICLE_CONFIDENCE))))
+)
 LIVE_STREAM_FPS = min(60.0, max(5.0, float(os.getenv("TRAFFIC_LIVE_STREAM_FPS", "15"))))
 LIVE_STREAM_WIDTH = min(1920, max(640, int(os.getenv("TRAFFIC_LIVE_STREAM_WIDTH", "960"))))
 _DEFAULT_LIVE_TRACKER = PROJECT_ROOT / "config" / "live_bytetrack.yaml"

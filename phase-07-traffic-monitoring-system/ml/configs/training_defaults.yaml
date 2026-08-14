@@ -1,0 +1,69 @@
+seed: 42
+workers: 4
+batch: -1
+device: cpu
+cache: false
+pretrained: true
+deterministic: true
+plots: true
+save: true
+close_mosaic: 10
+cos_lr: true
+
+vehicle:
+  model: yolo11s.pt
+  epochs: 100
+  imgsz: 640
+  patience: 20
+  augmentation:
+    hsv_h: 0.015
+    hsv_s: 0.55
+    hsv_v: 0.35
+    degrees: 2.0
+    translate: 0.10
+    scale: 0.45
+    shear: 1.0
+    perspective: 0.0003
+    fliplr: 0.5
+    flipud: 0.0
+    mosaic: 0.8
+    mixup: 0.05
+
+plate:
+  model: yolo11s.pt
+  epochs: 150
+  imgsz: 960
+  patience: 25
+  augmentation:
+    hsv_h: 0.008
+    hsv_s: 0.25
+    hsv_v: 0.25
+    degrees: 2.0
+    translate: 0.05
+    scale: 0.25
+    shear: 0.5
+    perspective: 0.00015
+    fliplr: 0.5
+    flipud: 0.0
+    mosaic: 0.45
+    mixup: 0.0
+
+helmet:
+  model: yolo11s.pt
+  epochs: 120
+  imgsz: 640
+  patience: 20
+  augmentation:
+    hsv_h: 0.012
+    hsv_s: 0.40
+    hsv_v: 0.35
+    degrees: 3.0
+    translate: 0.08
+    scale: 0.35
+    shear: 1.0
+    perspective: 0.00025
+    fliplr: 0.5
+    flipud: 0.0
+    mosaic: 0.65
+    mixup: 0.02
+

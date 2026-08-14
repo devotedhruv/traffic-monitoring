@@ -20,6 +20,7 @@ export default {
         primary: "rgb(var(--color-primary) / <alpha-value>)",
         "primary-hover": "rgb(var(--color-primary-hover) / <alpha-value>)",
         "primary-soft": "rgb(var(--color-primary-soft) / <alpha-value>)",
+        "on-primary": "rgb(var(--color-on-primary) / <alpha-value>)",
         cyan: "rgb(var(--color-cyan) / <alpha-value>)",
         "cyan-dark": "rgb(var(--color-cyan-dark) / <alpha-value>)",
         success: "rgb(var(--color-success) / <alpha-value>)",
@@ -30,7 +31,7 @@ export default {
         info: "rgb(var(--color-info) / <alpha-value>)",
         purple: "rgb(var(--color-purple) / <alpha-value>)"
       },
-      fontFamily: { sans: ["Manrope", "Inter", "ui-sans-serif", "system-ui", "sans-serif"] },
+      fontFamily: { sans: ["Poppins", "Segoe UI", "ui-sans-serif", "system-ui", "sans-serif"] },
       boxShadow: { panel: "var(--shadow-panel)", card: "var(--shadow-card)" }
     }
   },

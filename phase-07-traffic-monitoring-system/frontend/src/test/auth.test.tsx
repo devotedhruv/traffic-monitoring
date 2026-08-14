@@ -29,7 +29,7 @@ describe("public and authentication experience", () => {
   it("validates password confirmation before creating an account", async () => {
     window.history.replaceState(null, "", "/sign-up");
     render(<App />);
-    await screen.findByRole("heading", { name: /start with trafficops/i });
+    await screen.findByRole("heading", { name: /start with sadakdrishti/i });
     fireEvent.change(screen.getByPlaceholderText("Traffic operator"), { target: { value: "Road Admin" } });
     fireEvent.change(screen.getByPlaceholderText("you@organization.com"), { target: { value: "admin@example.com" } });
     fireEvent.change(screen.getByPlaceholderText("At least 8 characters"), { target: { value: "correct-pass" } });
@@ -42,7 +42,7 @@ describe("public and authentication experience", () => {
   it("catches a common Gmail domain typo before creating an account", async () => {
     window.history.replaceState(null, "", "/sign-up");
     render(<App />);
-    await screen.findByRole("heading", { name: /start with trafficops/i });
+    await screen.findByRole("heading", { name: /start with sadakdrishti/i });
     fireEvent.change(screen.getByPlaceholderText("Traffic operator"), { target: { value: "Road Admin" } });
     fireEvent.change(screen.getByPlaceholderText("you@organization.com"), { target: { value: "admin@gmaiil.com" } });
     fireEvent.change(screen.getByPlaceholderText("At least 8 characters"), { target: { value: "correct-pass" } });

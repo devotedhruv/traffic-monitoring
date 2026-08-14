@@ -1,5 +1,5 @@
 import {
-  Activity, AlertTriangle, BarChart3, Bell, CarFront, ChevronLeft, ChevronRight,
+  AlertTriangle, BarChart3, Bell, CarFront, ChevronLeft, ChevronRight,
   FileText, RadioTower, Settings, ShieldCheck, Video
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -7,6 +7,8 @@ import { useAuth } from "../../app/AuthContext";
 import { usePathname } from "../../app/router";
 import { cx } from "../../lib/format";
 import { api } from "../../services/api";
+import { PRODUCT_NAME, PRODUCT_TAGLINE } from "../../lib/brand";
+import { BrandLogo } from "../ui/BrandLogo";
 import { Link } from "../ui/Link";
 
 const navigation = [
@@ -22,9 +24,9 @@ const navigation = [
 
 function Brand({ collapsed = false }: { collapsed?: boolean }) {
   return (
-    <Link to="/app" className={cx("flex items-center gap-3", collapsed && "justify-center")} aria-label="TrafficOps AI dashboard">
-      <span className="brand-mark"><Activity size={25} strokeWidth={2.2} /></span>
-      {!collapsed && <span className="min-w-0"><strong className="block whitespace-nowrap text-[17px] tracking-[-0.02em]">TrafficOps <span className="text-primary">AI</span></strong><span className="block whitespace-nowrap text-[10px] text-muted">Road intelligence, made visible</span></span>}
+    <Link to="/app" className={cx("flex items-center gap-3", collapsed && "justify-center")} aria-label={`${PRODUCT_NAME} dashboard`}>
+      <BrandLogo variant="mark" className="brand-mark p-1" />
+      {!collapsed && <span className="min-w-0"><strong className="block whitespace-nowrap text-[17px] tracking-[-0.02em]">Sadak<span className="text-[#FF8395]">Drishti</span></strong><span className="block whitespace-nowrap text-[10px] text-muted">{PRODUCT_TAGLINE}</span></span>}
     </Link>
   );
 }
@@ -52,6 +54,7 @@ function Operator({ collapsed = false }: { collapsed?: boolean }) {
 
 export function AppSidebar({ collapsed, mobileOpen, onCollapse, onClose }: { collapsed: boolean; mobileOpen: boolean; onCollapse: () => void; onClose: () => void }) {
   const pathname = usePathname().replace(/\/+$/, "") || "/";
+  const settingsActive = pathname === "/app" && new URLSearchParams(window.location.search).get("panel") === "settings";
   const [newAlerts, setNewAlerts] = useState(0);
   useEffect(() => {
     const increment = () => setNewAlerts((count) => count + 1);
@@ -73,7 +76,7 @@ export function AppSidebar({ collapsed, mobileOpen, onCollapse, onClose }: { col
         {navigation.map(({ to, label, icon: Icon }) => {
           const path = to.split("?")[0];
           const active = path === "/app"
-            ? pathname === "/app" && label === "Live Operations"
+            ? pathname === "/app" && (label === "Settings" ? settingsActive : label === "Live Operations" && !settingsActive)
             : pathname === path && (
               path === "/app/history" ? label === "Vehicles"
               : path === "/app/violations" ? label === "Violations"
@@ -84,13 +87,13 @@ export function AppSidebar({ collapsed, mobileOpen, onCollapse, onClose }: { col
         })}
       </nav>
       <div className="space-y-3 p-3"><SystemStatus collapsed={collapsed} /><Operator collapsed={collapsed} /></div>
-      <button type="button" onClick={onCollapse} className="absolute -right-3 top-[96px] hidden h-7 w-7 place-items-center rounded-full border border-border bg-surface text-muted shadow-card hover:text-primary lg:grid" aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}>{collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}</button>
+      <button type="button" onClick={onCollapse} className="sidebar-collapse-button absolute -right-3 top-[96px] hidden h-7 w-7 place-items-center rounded-full border border-border bg-surface text-muted shadow-card hover:text-primary lg:grid" aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}>{collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}</button>
     </div>
   );
   return <>
-    <aside className={cx("fixed inset-y-0 left-0 z-50 hidden border-r border-border bg-sidebar transition-[width] duration-200 lg:block", collapsed ? "w-[82px]" : "w-[252px]")}>{sidebar}</aside>
+    <aside className={cx("app-sidebar-shell fixed inset-y-0 left-0 z-50 hidden border-r border-border bg-sidebar transition-[width] duration-200 lg:block", collapsed ? "w-[82px]" : "w-[252px]")}>{sidebar}</aside>
     <div className={cx("fixed inset-0 z-[60] bg-black/45 backdrop-blur-sm transition lg:hidden", mobileOpen ? "visible opacity-100" : "invisible opacity-0")} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <aside className={cx("h-full w-[286px] max-w-[86vw] border-r border-border bg-sidebar shadow-2xl transition-transform duration-200", mobileOpen ? "translate-x-0" : "-translate-x-full")} aria-hidden={!mobileOpen}>{mobileOpen && <div className="h-full">{sidebar}</div>}</aside>
+      <aside className={cx("app-sidebar-shell h-full w-[286px] max-w-[86vw] border-r border-border bg-sidebar shadow-2xl transition-transform duration-200", mobileOpen ? "translate-x-0" : "-translate-x-full")} aria-hidden={!mobileOpen}>{mobileOpen && <div className="h-full">{sidebar}</div>}</aside>
     </div>
   </>;
 }

@@ -1,0 +1,11 @@
+-r ../requirements.txt
+matplotlib>=3.10,<4
+Pillow>=11,<13
+PyYAML>=6,<7
+pytest>=8,<10
+
+# Optional OCR runtime. Tesseract remains the production default and must also
+# be installed as an OS package with the eng and nep language packs.
+# easyocr>=1.7,<2
+# kaggle>=1.7,<2       # optional: only for import_kaggle.py downloads
+# roboflow>=1.1,<2     # optional: local Roboflow ZIP imports need no package/API key

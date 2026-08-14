@@ -32,7 +32,7 @@ from config.settings import (
 )
 from services.camera_calibration import CameraCalibration
 from services.plate_detector import PlateDetector
-from services.plate_ocr import PlateOCRService, create_ocr_engine
+from services.plate_ocr import PlateOCRService, create_ocr_engine, ocr_dependency_status
 from services.speed_estimator import SpeedEstimator
 from src.database import (
     get_alert_for_violation, get_camera_calibration, get_camera_lane_rules,
@@ -47,7 +47,7 @@ from web.violations import (
 log = logging.getLogger("trafficops.runtime")
 VEHICLE_CLASSES = {"bicycle", "car", "motorcycle", "bus", "truck"}
 OVERLAY_FILTERS = {
-    "all", "car", "bike", "person", "violation",
+    "all", "car", "bike", "bus", "truck", "person", "violation",
     "no_helmet", "wrong_lane", "overspeed",
 }
 
@@ -340,6 +340,12 @@ class TrafficRuntime:
         self.helmet_reason: str | None = "Dedicated helmet weights are not configured"
         self.plate_available = False
         self.plate_reason: str | None = "Dedicated plate weights and OCR are not configured"
+        self.vehicle_model_loaded = False
+        self.plate_model_loaded = False
+        ocr_status = ocr_dependency_status(PLATE_OCR_ENGINE, TESSERACT_CMD, PLATE_OCR_LANGUAGES)
+        self.ocr_backend = str(ocr_status["backend"])
+        self.ocr_available = bool(ocr_status["available"])
+        self.ocr_languages = list(ocr_status["languages"])
         self.active_tracks = 0
         self.active_detections = 0
         self.latest_detection: dict[str, Any] | None = None
@@ -507,6 +513,10 @@ class TrafficRuntime:
             labels.add("car")
         if item.vehicle_type in {"bicycle", "motorcycle"}:
             labels.add("bike")
+        if item.vehicle_type == "bus":
+            labels.add("bus")
+        if item.vehicle_type == "truck":
+            labels.add("truck")
         if item.vehicle_type == "person" and not item.vehicle_associated:
             labels.add("person")
         if item.status == "OVERSPEED" or item.violations:
@@ -543,6 +553,33 @@ class TrafficRuntime:
     def capabilities(self) -> dict[str, dict[str, Any]]:
         calibrated = self.road_profile is not None
         return {
+            "models": {
+                "vehicle": {
+                    "configured": bool(LIVE_MODEL_PATH), "loaded": self.vehicle_model_loaded,
+                    "version": Path(LIVE_MODEL_PATH).stem if LIVE_MODEL_PATH else None,
+                },
+                "plate": {
+                    "configured": bool(PLATE_MODEL_PATH), "loaded": self.plate_model_loaded,
+                    "version": Path(PLATE_MODEL_PATH).stem if PLATE_MODEL_PATH else None,
+                },
+                "helmet": {
+                    "configured": bool(HELMET_MODEL_PATH), "loaded": self.helmet_available,
+                    "version": Path(HELMET_MODEL_PATH).stem if HELMET_MODEL_PATH else None,
+                },
+            },
+            "ocr": {
+                "backend": self.ocr_backend,
+                "available": self.ocr_available,
+                "languages": self.ocr_languages,
+            },
+            "tracking": {
+                "configuration": Path(LIVE_TRACKER_CONFIG).name,
+            },
+            "cameraCalibration": {
+                "configured": calibrated,
+                "id": "live-road-profile" if calibrated else None,
+                "quality": self.road_profile.quality if self.road_profile else 0.0,
+            },
             "plateRecognition": {
                 "available": self.plate_available,
                 "reason": self.plate_reason,
@@ -679,6 +716,66 @@ class TrafficRuntime:
         path = directory / f"vehicle-{record_id}-g{generation}-t{tracking_id}.jpg"
         return str(path) if cv2.imwrite(str(path), image) else None
 
+    def _save_detection_snapshot(
+        self,
+        frame: Any,
+        box: tuple[int, int, int, int],
+        tracking_id: int,
+        vehicle_type: str,
+        generation: int,
+    ) -> str | None:
+        """Persist one immutable, contextual crop from the first detected frame."""
+        if frame is None or not getattr(frame, "size", 0):
+            return None
+        frame_height, frame_width = frame.shape[:2]
+        x1, y1, x2, y2 = box
+        x1, x2 = sorted((max(0, min(frame_width, x1)), max(0, min(frame_width, x2))))
+        y1, y2 = sorted((max(0, min(frame_height, y1)), max(0, min(frame_height, y2))))
+        if x2 <= x1 or y2 <= y1:
+            return None
+        margin_x = max(12, round((x2 - x1) * 0.35))
+        margin_y = max(12, round((y2 - y1) * 0.35))
+        crop_x1, crop_y1 = max(0, x1 - margin_x), max(0, y1 - margin_y)
+        crop_x2, crop_y2 = min(frame_width, x2 + margin_x), min(frame_height, y2 + margin_y)
+        snapshot = frame[crop_y1:crop_y2, crop_x1:crop_x2].copy()
+        if not snapshot.size:
+            return None
+
+        relative_box = (x1 - crop_x1, y1 - crop_y1, x2 - crop_x1, y2 - crop_y1)
+        cv2.rectangle(
+            snapshot, relative_box[:2], relative_box[2:], (52, 211, 116), 2
+        )
+        label = f"#{tracking_id} {vehicle_type}"
+        (_, text_height), baseline = cv2.getTextSize(
+            label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
+        )
+        label_y = max(text_height + baseline + 6, relative_box[1])
+        cv2.putText(
+            snapshot, label, (relative_box[0] + 3, label_y - baseline - 3),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (52, 211, 116), 1, cv2.LINE_AA,
+        )
+
+        longest_edge = max(snapshot.shape[:2])
+        if longest_edge > 960:
+            scale = 960 / longest_edge
+            snapshot = cv2.resize(
+                snapshot,
+                (max(1, round(snapshot.shape[1] * scale)), max(1, round(snapshot.shape[0] * scale))),
+                interpolation=cv2.INTER_AREA,
+            )
+        safe_session = "".join(
+            character for character in (self.session_started_at or "runtime")
+            if character.isalnum()
+        )[-24:]
+        directory = PROJECT_ROOT / "output" / "detections"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{safe_session}-g{generation}-t{tracking_id}.jpg"
+        temporary = path.with_suffix(".pending.jpg")
+        if not cv2.imwrite(str(temporary), snapshot, [cv2.IMWRITE_JPEG_QUALITY, 88]):
+            return None
+        temporary.replace(path)
+        return str(path)
+
     def _save_live_violation(
         self,
         frame: Any,
@@ -780,6 +877,7 @@ class TrafficRuntime:
         plate_images: dict[int, Any] = {}
         confirmed_plates: dict[int, str] = {}
         plate_snapshot_urls: dict[int, str] = {}
+        detection_snapshot_urls: dict[int, str] = {}
         confirmed_violations: dict[int, set[str]] = defaultdict(set)
         helmet_votes = HelmetVoteTracker(LIVE_HELMET_CONFIRMATIONS)
         lane_tracker: LaneViolationTracker | None = None
@@ -804,6 +902,7 @@ class TrafficRuntime:
                 plate_images = {}
                 confirmed_plates = {}
                 plate_snapshot_urls = {}
+                detection_snapshot_urls = {}
                 confirmed_violations = defaultdict(set)
                 helmet_votes = HelmetVoteTracker(LIVE_HELMET_CONFIRMATIONS)
                 lane_tracker = None
@@ -943,14 +1042,24 @@ class TrafficRuntime:
                     }
                     persist_detection = should_persist_detection(file_source, item.generation)
                     if persist_detection and track_id not in persisted:
+                        snapshot_path = self._save_detection_snapshot(
+                            item.frame, (x1, y1, x2, y2), track_id,
+                            vehicle_type, item.generation,
+                        )
                         record_id = save_vehicle(
                             "UNKNOWN", speed if speed_available else None,
-                            status, track_id, vehicle_type, CAMERA_ID,
+                            status, track_id, vehicle_type, CAMERA_ID, snapshot_path,
                         )
                         detection["id"] = record_id
+                        detection["snapshotUrl"] = (
+                            f"/api/vehicles/{record_id}/snapshot" if snapshot_path else None
+                        )
+                        if detection["snapshotUrl"]:
+                            detection_snapshot_urls[track_id] = detection["snapshotUrl"]
                         persisted[track_id] = record_id
                     elif track_id in persisted:
                         detection["id"] = persisted[track_id]
+                        detection["snapshotUrl"] = detection_snapshot_urls.get(track_id)
                     plate_read = plate_ocr.result(track_id)
                     if (
                         self.plate_available
@@ -966,7 +1075,8 @@ class TrafficRuntime:
                         if candidate is not None and candidate.quality >= PLATE_MIN_QUALITY:
                             plate_images[track_id] = candidate.crop.copy()
                             plate_ocr.submit(
-                                track_id, candidate.enhanced, analyzed_frames, item.timestamp
+                                track_id, candidate.enhanced, analyzed_frames, item.timestamp,
+                                candidate.quality,
                             )
                     if plate_read.status == "CONFIRMED" and plate_read.text:
                         detection["plate"] = plate_read.text
@@ -1136,15 +1246,21 @@ class TrafficRuntime:
 
             log.info("Loading live model %s", LIVE_MODEL_PATH)
             model = YOLO(LIVE_MODEL_PATH)
+            self.vehicle_model_loaded = True
             helmet_specialist = HelmetSpecialist(HELMET_MODEL_PATH, LIVE_HELMET_CONFIDENCE)
             self.helmet_available = helmet_specialist.available
             self.helmet_reason = helmet_specialist.reason
             plate_detector = PlateDetector(PLATE_MODEL_PATH, PLATE_CONFIDENCE)
+            self.plate_model_loaded = plate_detector.available
             plate_ocr = PlateOCRService(create_ocr_engine(
                 PLATE_OCR_ENGINE,
                 command=TESSERACT_CMD,
                 languages=PLATE_OCR_LANGUAGES,
             ))
+            self.ocr_backend = str(getattr(plate_ocr.engine, "backend", PLATE_OCR_ENGINE))
+            self.ocr_available = plate_ocr.available
+            configured_languages = str(getattr(plate_ocr.engine, "languages", ""))
+            self.ocr_languages = [item for item in configured_languages.split("+") if item]
             self.plate_available = plate_detector.available and plate_ocr.available
             if not plate_detector.available:
                 self.plate_reason = "Dedicated number-plate detector weights are not configured"
@@ -1273,6 +1389,9 @@ class TrafficRuntime:
             log.exception("Traffic runtime stopped")
         finally:
             self.running = False
+            self.vehicle_model_loaded = False
+            self.plate_model_loaded = False
+            self.helmet_available = False
             if self.source_mode == "browser":
                 self.browser_connected = False
             self._stop_event.set()

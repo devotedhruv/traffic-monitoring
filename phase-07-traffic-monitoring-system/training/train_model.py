@@ -1,59 +1,38 @@
-"""Train a TrafficOps detector using an Ultralytics-formatted dataset.
-
-Examples:
-    python training/train_model.py --task vehicle --data training/datasets/vehicles.yaml
-    python training/train_model.py --task plate --data training/datasets/plates.yaml
-    python training/train_model.py --task helmet --data training/datasets/helmets.yaml
-"""
+"""Backward-compatible wrapper for the SadakDrishti ML training subsystem."""
 
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
-from ultralytics import YOLO
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from ml.scripts.train import add_training_arguments, run_training
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Fine-tune a TrafficOps YOLO detector")
-    parser.add_argument("--task", choices=("vehicle", "plate", "helmet"), required=True)
-    parser.add_argument("--data", type=Path, required=True, help="Ultralytics dataset YAML")
-    parser.add_argument("--base-model", default="models/yolo11s.pt")
-    parser.add_argument("--epochs", type=int, default=120)
-    parser.add_argument("--image-size", type=int, default=960)
-    parser.add_argument("--batch", type=int, default=8)
-    parser.add_argument("--device", default="0", help="CUDA index, 'cpu', or comma-separated GPUs")
-    parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--patience", type=int, default=25)
-    parser.add_argument("--project", default="training/runs")
-    return parser.parse_args()
-
-
-def main() -> None:
-    args = parse_args()
-    if not args.data.is_file():
-        raise SystemExit(f"Dataset configuration does not exist: {args.data}")
-    if not Path(args.base_model).is_file():
-        raise SystemExit(f"Base weights do not exist: {args.base_model}")
-
-    model = YOLO(args.base_model)
-    model.train(
-        data=str(args.data),
-        epochs=args.epochs,
-        imgsz=args.image_size,
-        batch=args.batch,
-        device=args.device,
-        workers=args.workers,
-        patience=args.patience,
-        project=args.project,
-        name=f"trafficops-{args.task}",
-        pretrained=True,
-        close_mosaic=10,
-        cos_lr=True,
-        plots=True,
-        seed=42,
+def parse_args() -> tuple[str, argparse.Namespace]:
+    compatibility = argparse.ArgumentParser(
+        description="Compatibility wrapper; prefer ml/scripts/train_<task>.py for new runs.",
+        add_help=False,
     )
+    compatibility.add_argument("--task", choices=("vehicle", "plate", "helmet"), required=True)
+    task, remaining = compatibility.parse_known_args()
+    parser = argparse.ArgumentParser(description=f"Train the SadakDrishti {task.task} detector")
+    add_training_arguments(parser, task.task)
+    parser.add_argument("--base-model", dest="model", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    parser.add_argument("--image-size", dest="imgsz", type=int, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    args = parser.parse_args(remaining)
+    return task.task, args
+
+
+def main() -> int:
+    task, args = parse_args()
+    run_training(task, args)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
