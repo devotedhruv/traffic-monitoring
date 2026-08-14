@@ -7,6 +7,8 @@ services:
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
+      - key: TRAFFIC_VIDEO_SOURCE
+        value: /app/videos/traffic.mp4
       - key: TRAFFIC_LIVE_IMAGE_SIZE
         value: "320"
       - key: TRAFFIC_LIVE_STREAM_WIDTH
