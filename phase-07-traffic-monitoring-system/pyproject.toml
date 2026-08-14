@@ -1,0 +1,12 @@
+[project]
+name = "traffic-monitoring"
+version = "0.1.0"
+description = "AI Traffic Monitoring System"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+]
+
+[tool.vercel]
+entrypoint = "web.api:app"
