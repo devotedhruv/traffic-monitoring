@@ -595,3 +595,19 @@ async def browser_camera_ingest(websocket: WebSocket, camera_id: str):
         return
     finally:
         runtime.set_browser_connected(False)
+
+
+_frontend_dist = PROJECT_ROOT / "frontend" / "dist"
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def frontend_fallback(full_path: str):
+    """Serve the built dashboard from one origin when frontend/dist is present."""
+    if full_path.split("/", 1)[0] in {"api", "ws", "docs", "openapi", "redoc"}:
+        raise HTTPException(status_code=404)
+    if not _frontend_dist.is_dir():
+        raise HTTPException(status_code=404)
+    candidate = (_frontend_dist / full_path).resolve()
+    if candidate.is_file() and candidate.is_relative_to(_frontend_dist.resolve()):
+        return FileResponse(candidate)
+    return FileResponse(_frontend_dist / "index.html")

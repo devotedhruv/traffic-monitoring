@@ -6,6 +6,8 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from pathlib import Path
+
 from config.settings import (
     ALERT_COOLDOWN_SECONDS, CAMERA_ID, CAMERA_NAME, DATABASE_PATH, SPEED_LIMIT,
 )
@@ -31,6 +33,7 @@ def _connect():
 
 
 def create_database() -> None:
+    Path(DATABASE_PATH).parent.mkdir(parents=True, exist_ok=True)
     with _connect() as connection:
         # Live detections and browser sessions share this database. WAL lets
         # authentication reads continue while the pipeline is saving events.

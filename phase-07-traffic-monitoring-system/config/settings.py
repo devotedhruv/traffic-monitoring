@@ -170,6 +170,9 @@ ALLOWED_ORIGINS = [
 AUTH_COOKIE_NAME = os.getenv("TRAFFIC_AUTH_COOKIE_NAME", "trafficops_session")
 AUTH_SESSION_HOURS = min(24 * 30, max(1, int(os.getenv("TRAFFIC_AUTH_SESSION_HOURS", "168"))))
 AUTH_COOKIE_SECURE = os.getenv("TRAFFIC_AUTH_COOKIE_SECURE", "false").lower() == "true"
+AUTH_COOKIE_SAMESITE = os.getenv("TRAFFIC_AUTH_COOKIE_SAMESITE", "lax").strip().lower()
+if AUTH_COOKIE_SAMESITE not in {"lax", "strict", "none"}:
+    AUTH_COOKIE_SAMESITE = "lax"
 ALERT_COOLDOWN_SECONDS = min(
     3600, max(1, int(os.getenv("TRAFFIC_ALERT_COOLDOWN_SECONDS", "30")))
 )

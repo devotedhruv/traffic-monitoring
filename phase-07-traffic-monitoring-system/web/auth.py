@@ -13,7 +13,9 @@ from typing import Annotated, Any, NoReturn
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field, field_validator
 
-from config.settings import AUTH_COOKIE_NAME, AUTH_COOKIE_SECURE, AUTH_SESSION_HOURS
+from config.settings import (
+    AUTH_COOKIE_NAME, AUTH_COOKIE_SAMESITE, AUTH_COOKIE_SECURE, AUTH_SESSION_HOURS,
+)
 from src.database import (
     create_auth_session,
     create_user,
@@ -137,7 +139,7 @@ def _set_session(response: Response, user_id: int) -> None:
         max_age=AUTH_SESSION_HOURS * 60 * 60,
         httponly=True,
         secure=AUTH_COOKIE_SECURE,
-        samesite="lax",
+        samesite=AUTH_COOKIE_SAMESITE,
         path="/",
     )
 
@@ -205,4 +207,4 @@ def signout(request: Request, response: Response):
             delete_auth_session(_token_hash(token))
         except sqlite3.Error as error:
             _storage_unavailable(error)
-    response.delete_cookie(AUTH_COOKIE_NAME, path="/", secure=AUTH_COOKIE_SECURE, httponly=True, samesite="lax")
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/", secure=AUTH_COOKIE_SECURE, httponly=True, samesite=AUTH_COOKIE_SAMESITE)

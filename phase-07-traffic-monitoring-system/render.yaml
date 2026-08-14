@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: traffic-monitoring-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: TRAFFIC_ALLOWED_ORIGINS
+        value: https://traffic-monitoring-eta.vercel.app
+      - key: TRAFFIC_AUTH_COOKIE_SECURE
+        value: "true"
+      - key: TRAFFIC_AUTH_COOKIE_SAMESITE
+        value: none
+      - key: TRAFFIC_LIVE_IMAGE_SIZE
+        value: "320"
+      - key: TRAFFIC_LIVE_STREAM_WIDTH
+        value: "640"
+      - key: TRAFFIC_LIVE_STREAM_FPS
+        value: "10"
+      - key: TRAFFIC_LIVE_PREPROCESS_FILES
+        value: "false"
+      - key: TRAFFIC_ANALYSIS_FPS
+        value: "10"
+      - key: TRAFFIC_MAX_UPLOAD_MB
+        value: "100"
+      - key: TRAFFIC_AUTOSTART
+        value: "true"
