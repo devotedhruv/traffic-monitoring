@@ -1,4 +1,4 @@
-import type { AnalyticsData, AnalyticsRange, DashboardSummary, PaginatedVehicles, VehicleDetection, VehicleQuery, VehicleStatus, VehicleType } from "../types";
+import type { AnalyticsData, AnalyticsRange, CameraConfig, DashboardSummary, DemoVideo, Junction, PaginatedVehicles, VehicleDetection, VehicleQuery, VehicleStatus, VehicleType } from "../types";
 
 const types: VehicleType[] = ["car", "motorcycle", "bicycle", "bus", "truck"];
 const plates = ["BA 12 PA 1234", "BA 08 CHA 4421", "GA 03 PA 9022", null, "NA 05 KHA 7810"];
@@ -88,3 +88,31 @@ export function nextMockDetection(): VehicleDetection {
     cameraName: "North Junction"
   };
 }
+
+export const mockJunctions: Junction[] = [
+  { id: "north", name: "North Junction", location: "Birendranagar, Surkhet", description: "Main city entry point with highest mixed-traffic volume.", status: "ACTIVE", enabled: true, speedLimit: 50, cameraCount: 2, demoVideoCount: 0 },
+  { id: "bus-park", name: "Surkhet Bus Park", location: "Bus Park Road, Birendranagar", description: "Bus and tempo loading zone with heavy pedestrian flow.", status: "ACTIVE", enabled: true, speedLimit: 30, cameraCount: 2, demoVideoCount: 0 },
+  { id: "airport-chowk", name: "Airport Chowk", location: "Surkhet Airport Road", description: "Junction near Surkhet airport access road.", status: "ACTIVE", enabled: true, speedLimit: 50, cameraCount: 2, demoVideoCount: 0 },
+  { id: "demo", name: "Demo Junction", location: "Showcase", description: "Pre-recorded scenarios for presentations and testing.", status: "ACTIVE", enabled: true, speedLimit: 50, cameraCount: 2, demoVideoCount: 7 }
+];
+
+export const mockCameras: CameraConfig[] = [
+  { id: "north-cam-01", junctionId: "north", junctionName: "North Junction", name: "Camera 01", sourceType: "live", videoUrl: "", speedLimit: null, enabled: true },
+  { id: "north-cam-02", junctionId: "north", junctionName: "North Junction", name: "Camera 02", sourceType: "live", videoUrl: "", speedLimit: null, enabled: true },
+  { id: "bus-park-cam-01", junctionId: "bus-park", junctionName: "Surkhet Bus Park", name: "Camera 01", sourceType: "live", videoUrl: "", speedLimit: null, enabled: true },
+  { id: "bus-park-cam-02", junctionId: "bus-park", junctionName: "Surkhet Bus Park", name: "Camera 02", sourceType: "live", videoUrl: "", speedLimit: null, enabled: true },
+  { id: "airport-cam-01", junctionId: "airport-chowk", junctionName: "Airport Chowk", name: "Camera 01", sourceType: "live", videoUrl: "", speedLimit: null, enabled: true },
+  { id: "airport-cam-02", junctionId: "airport-chowk", junctionName: "Airport Chowk", name: "Camera 02", sourceType: "live", videoUrl: "", speedLimit: null, enabled: true },
+  { id: "demo-cam-01", junctionId: "demo", junctionName: "Demo Junction", name: "Camera 01", sourceType: "demo", videoUrl: "", speedLimit: null, enabled: true },
+  { id: "demo-cam-02", junctionId: "demo", junctionName: "Demo Junction", name: "Camera 02", sourceType: "demo", videoUrl: "", speedLimit: null, enabled: true }
+];
+
+export const mockDemoVideos: DemoVideo[] = [
+  { id: "demo-normal", junctionId: "demo", cameraId: "demo-cam-01", title: "Normal Traffic", description: "Steady mixed traffic moving within the speed limit.", filename: "normal_traffic.mp4", scenario: "normal", duration: 42, speedLimit: 50, enabled: true, available: false, previewUrl: null },
+  { id: "demo-helmet", junctionId: "demo", cameraId: "demo-cam-01", title: "Helmet Violation", description: "Motorcyclists riding without helmets at the junction.", filename: "helmet_violation.mp4", scenario: "helmet", duration: 38, speedLimit: 50, enabled: true, available: false, previewUrl: null },
+  { id: "demo-overspeed", junctionId: "demo", cameraId: "demo-cam-01", title: "Overspeed Detection", description: "Vehicles exceeding the junction speed limit.", filename: "overspeed.mp4", scenario: "overspeed", duration: 45, speedLimit: 50, enabled: true, available: false, previewUrl: null },
+  { id: "demo-wrong-lane", junctionId: "demo", cameraId: "demo-cam-02", title: "Wrong Lane", description: "Vehicles driving against the permitted lane direction.", filename: "wrong_lane.mp4", scenario: "wrong_lane", duration: 40, speedLimit: 50, enabled: true, available: false, previewUrl: null },
+  { id: "demo-anpr", junctionId: "demo", cameraId: "demo-cam-02", title: "ANPR Demo", description: "Number-plate recognition of passing vehicles.", filename: "anpr_demo.mp4", scenario: "anpr", duration: 36, speedLimit: 50, enabled: true, available: false, previewUrl: null },
+  { id: "demo-busy", junctionId: "demo", cameraId: "demo-cam-02", title: "Busy Junction", description: "Heavy congestion at peak evening hours.", filename: "busy_junction.mp4", scenario: "heavy", duration: 60, speedLimit: 50, enabled: true, available: false, previewUrl: null },
+  { id: "demo-night", junctionId: "demo", cameraId: "demo-cam-02", title: "Night Traffic", description: "Low-light monitoring at night.", filename: "night_traffic.mp4", scenario: "night", duration: 52, speedLimit: 50, enabled: true, available: false, previewUrl: null }
+];

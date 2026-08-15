@@ -36,6 +36,12 @@ export function useLiveEvents() {
   const [analysisFps, setAnalysisFps] = useState(config.useMocks ? 15 : 0);
   const [activeTracks, setActiveTracks] = useState(0);
   const [activeDetections, setActiveDetections] = useState(0);
+  const [sourceMode, setSourceMode] = useState<"configured" | "browser" | "demo">("configured");
+  const [cameraName, setCameraName] = useState("");
+  const [demoVideoId, setDemoVideoId] = useState<string | null>(null);
+  const [demoPaused, setDemoPaused] = useState(false);
+  const [demoProgress, setDemoProgress] = useState(0);
+  const [demoDuration, setDemoDuration] = useState<number | null>(null);
   const seen = useRef(new Set<string>());
   const lastQueryRefresh = useRef(0);
 
@@ -96,6 +102,12 @@ export function useLiveEvents() {
             if (typeof event.data.analysisFps === "number") setAnalysisFps(event.data.analysisFps);
             if (typeof event.data.activeTracks === "number") setActiveTracks(event.data.activeTracks);
             if (typeof event.data.activeDetections === "number") setActiveDetections(event.data.activeDetections);
+            if (event.data.sourceMode) setSourceMode(event.data.sourceMode);
+            if (typeof event.data.cameraName === "string") setCameraName(event.data.cameraName);
+            if (event.data.demoVideoId !== undefined) setDemoVideoId(event.data.demoVideoId);
+            if (typeof event.data.demoPaused === "boolean") setDemoPaused(event.data.demoPaused);
+            if (typeof event.data.demoProgress === "number") setDemoProgress(event.data.demoProgress);
+            if (event.data.demoDurationSeconds !== undefined) setDemoDuration(event.data.demoDurationSeconds);
             setConnection(event.data.connection);
           }
         } catch {
@@ -116,12 +128,21 @@ export function useLiveEvents() {
       };
     };
     connect();
+    const resetLive = () => {
+      setLatest(null);
+      setLatestViolation(null);
+      setLatestAlert(null);
+      seen.current.clear();
+      lastQueryRefresh.current = 0;
+    };
+    window.addEventListener("trafficops:reset-live", resetLive);
     return () => {
       stopped = true;
       if (timer) clearTimeout(timer);
       socket?.close();
+      window.removeEventListener("trafficops:reset-live", resetLive);
     };
   }, [client]);
 
-  return { connection, latest, latestViolation, latestAlert, fps, analysisFps, activeTracks, activeDetections };
+  return { connection, latest, latestViolation, latestAlert, fps, analysisFps, activeTracks, activeDetections, sourceMode, cameraName, demoVideoId, demoPaused, demoProgress, demoDuration };
 }

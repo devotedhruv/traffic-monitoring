@@ -33,6 +33,8 @@ def _required_model_or_default(value: str, fallback: Path, label: str) -> str:
 SPEED_LIMIT = float(os.getenv("TRAFFIC_SPEED_LIMIT", "50"))
 VIDEO_SOURCE = os.getenv("TRAFFIC_VIDEO_SOURCE", str(PROJECT_ROOT / "videos" / "traffic.mp4"))
 VIDEO_PATH = VIDEO_SOURCE
+DEMO_VIDEO_DIR = os.getenv("TRAFFIC_DEMO_VIDEO_DIR", str(PROJECT_ROOT / "videos" / "demo"))
+DEMO_VIDEO_BASE_URL = os.getenv("TRAFFIC_DEMO_VIDEO_BASE_URL", "").strip().rstrip("/")
 VEHICLE_MODEL_PATH = _optional_existing_model(
     os.getenv("TRAFFIC_VEHICLE_MODEL_PATH", ""), "vehicle",
 )

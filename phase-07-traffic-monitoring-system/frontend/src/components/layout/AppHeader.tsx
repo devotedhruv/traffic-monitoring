@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, BarChart3, ChevronDown, Clock3, LayoutDashboard, LogOut, Menu, Radio, Sparkles } from "lucide-react";
 import { useAuth } from "../../app/AuthContext";
 import { useLive } from "../../app/LiveContext";
@@ -7,11 +6,12 @@ import { navigate, usePathname } from "../../app/router";
 import { config } from "../../lib/config";
 import { PRODUCT_NAME } from "../../lib/brand";
 import { cx } from "../../lib/format";
-import { api } from "../../services/api";
 import { Link } from "../ui/Link";
 import { LanguageToggle } from "../ui/LanguageToggle";
 import { BrandLogo } from "../ui/BrandLogo";
 import { useLanguage } from "../../app/LanguageContext";
+import { useJunctions } from "../../app/JunctionContext";
+import { JunctionSelector } from "../../features/junctions/JunctionSelector";
 
 const links = [
   { to: "/app", text: "Dashboard", icon: LayoutDashboard },
@@ -28,12 +28,12 @@ export function AppHeader({ collapsed, onMenu }: { collapsed: boolean; onMenu: (
   const settingsActive = pathname === "/app" && new URLSearchParams(window.location.search).get("panel") === "settings";
   const { connection } = useLive();
   const { user, signOut } = useAuth();
-  const cameras = useQuery({ queryKey: ["cameras"], queryFn: api.getCameras });
+  const { sourceMode } = useJunctions();
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(timer);
   }, []);
-  const label = connection === "connected" ? "LIVE" : connection.toUpperCase();
+  const label = connection === "connected" ? (sourceMode === "demo" ? "DEMO" : "LIVE") : connection.toUpperCase();
 
   return (
     <header className={cx("app-header-shell sticky top-0 z-40 h-[72px] border-b border-border bg-header/90 backdrop-blur-xl transition-[margin] duration-200", collapsed ? "lg:ml-[82px]" : "lg:ml-[252px]") }>
@@ -45,8 +45,8 @@ export function AppHeader({ collapsed, onMenu }: { collapsed: boolean; onMenu: (
         </nav>
         <div className="ml-auto flex min-w-0 items-center gap-2 sm:gap-3">
           {config.useMocks && <span className="hidden rounded-full border border-warning/30 bg-warning/10 px-2.5 py-1 text-[9px] font-bold tracking-wider text-warning 2xl:block">DEMO DATA</span>}
-          <label className="hidden items-center gap-2 text-xs text-muted lg:flex"><span className="hidden xl:inline">Camera</span><span className="relative"><select className="h-10 appearance-none rounded-xl border border-border bg-surface px-3 pr-9 text-xs font-semibold text-ink hover:border-border-strong" aria-label="Select camera">{(cameras.data ?? [{ id: "camera-01", name: "North Junction" }]).map((camera) => <option key={camera.id} value={camera.id}>{camera.name}</option>)}</select><ChevronDown className="pointer-events-none absolute right-3 top-3 text-muted" size={14} /></span></label>
-          <div className={cx("live-badge", connection === "connected" ? "text-success" : connection === "reconnecting" ? "text-warning" : "text-danger")} aria-live="polite"><Radio size={14} /><span>{label}</span></div>
+          <JunctionSelector />
+          <div className={cx("live-badge", connection === "connected" ? (sourceMode === "demo" ? "text-danger" : "text-success") : connection === "reconnecting" ? "text-warning" : "text-danger")} aria-live="polite"><Radio size={14} /><span>{label}</span></div>
           <time className="hidden min-w-[148px] text-right text-[11px] tabular-nums text-muted 2xl:block"><span className="block">{new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(now)}</span><strong className="block text-xs text-ink">{new Intl.DateTimeFormat(locale, { timeStyle: "medium" }).format(now)}</strong></time>
           <LanguageToggle />
           <details className="group relative">

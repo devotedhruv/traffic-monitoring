@@ -1,6 +1,6 @@
 import { config, endpoints } from "../lib/config";
-import { getMockAnalytics, getMockSummary, getMockVehicles, mockVehicles } from "../mocks/data";
-import type { AlertDetail, AlertQuery, AlertSummary, AnalyticsData, AnalyticsRange, AuthResponse, AuthUser, Camera, CameraSettings, DashboardSummary, LaneRule, LiveCameraCalibration, PaginatedAlerts, PaginatedVehicles, PaginatedViolations, ReportFilters, ReportFrequency, ReportQuery, ReportRecord, ReportSchedule, ReportSummary, ReportTemplate, ReportType, SystemHealth, VehicleDetection, VehicleQuery, VideoAnalysisJob, VideoAnalysisOptions, ViolationCapabilities, ViolationQuery, ViolationSummary, ViolationType } from "../types";
+import { getMockAnalytics, getMockSummary, getMockVehicles, mockCameras, mockDemoVideos, mockJunctions, mockVehicles } from "../mocks/data";
+import type { AlertDetail, AlertQuery, AlertSummary, AnalyticsData, AnalyticsRange, AuthResponse, AuthUser, Camera, CameraConfig, CameraSettings, DashboardSummary, DemoScenarioOption, DemoStatus, DemoStartResponse, DemoVideo, Junction, LaneRule, LiveCameraCalibration, PaginatedAlerts, PaginatedVehicles, PaginatedViolations, ReportFilters, ReportFrequency, ReportQuery, ReportRecord, ReportSchedule, ReportSummary, ReportTemplate, ReportType, SystemHealth, VehicleDetection, VehicleQuery, VideoAnalysisJob, VideoAnalysisOptions, ViolationCapabilities, ViolationQuery, ViolationSummary, ViolationType } from "../types";
 
 export class ApiError extends Error {
   status: number;
@@ -237,5 +237,85 @@ export const api = {
   startVideoAnalysis,
   getVideoAnalysis: (jobId: string) =>
     request<VideoAnalysisJob>(endpoints.videoAnalysisJob(jobId)),
-  resolveApiUrl: (path: string) => path.startsWith("http") ? path : `${config.apiBaseUrl}${path}`
+  resolveApiUrl: (path: string) => path.startsWith("http") ? path : `${config.apiBaseUrl}${path}`,
+  getJunctions: () => config.useMocks
+    ? Promise.resolve<{ items: Junction[] }>({ items: mockJunctions })
+    : request<{ items: Junction[] }>(endpoints.junctions),
+  getJunctionCameras: (junctionId: string) => config.useMocks
+    ? Promise.resolve<{ items: CameraConfig[] }>({ items: mockCameras.filter((camera) => camera.junctionId === junctionId) })
+    : request<{ items: CameraConfig[] }>(endpoints.junctionCameras(junctionId)),
+  getCameraConfig: (cameraId: string) => config.useMocks
+    ? Promise.resolve(mockCameras.find((camera) => camera.id === cameraId) ?? null)
+    : request<CameraConfig | null>(endpoints.cameraConfig(cameraId)),
+  getDemoVideos: (filters: { junctionId?: string; cameraId?: string; scenario?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (filters.junctionId) params.set("junction_id", filters.junctionId);
+    if (filters.cameraId) params.set("camera_id", filters.cameraId);
+    if (filters.scenario && filters.scenario !== "all") params.set("scenario", filters.scenario);
+    const query = params.toString();
+    return config.useMocks
+      ? Promise.resolve<{ items: DemoVideo[] }>({ items: mockDemoVideos.filter((video) =>
+        (!filters.junctionId || video.junctionId === filters.junctionId) &&
+        (!filters.cameraId || video.cameraId === filters.cameraId) &&
+        (!filters.scenario || filters.scenario === "all" || video.scenario === filters.scenario)
+      ) })
+      : request<{ items: DemoVideo[] }>(`${endpoints.demoVideos}?${query}`);
+  },
+  getDemoScenarios: () => config.useMocks
+    ? Promise.resolve<{ items: DemoScenarioOption[] }>({ items: [
+      { id: "normal", label: "Normal Traffic" }, { id: "helmet", label: "Helmet Violation" },
+      { id: "overspeed", label: "Overspeed" }, { id: "wrong_lane", label: "Wrong Lane" },
+      { id: "anpr", label: "ANPR" }, { id: "heavy", label: "Heavy Traffic" },
+      { id: "night", label: "Night Traffic" }
+    ] })
+    : request<{ items: DemoScenarioOption[] }>(endpoints.demoScenarios),
+  getDemoStatus: () => config.useMocks
+    ? Promise.resolve<DemoStatus>({ active: false, videoId: null, cameraName: "North Junction", sourceMode: "configured", paused: false, available: true, error: null, durationSeconds: null, video: null })
+    : request<DemoStatus>(endpoints.demoStatus),
+  startDemo: (junctionId: string, cameraId: string, videoId: string) => config.useMocks
+    ? Promise.resolve<DemoStartResponse>({ started: true, available: true, status: { active: true, videoId, cameraName: "Demo Camera", sourceMode: "demo", paused: false, available: true, error: null, durationSeconds: 45, video: mockDemoVideos.find((video) => video.id === videoId) ?? null } })
+    : request<DemoStartResponse>(endpoints.demoStart, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ junctionId, cameraId, videoId })
+    }),
+  stopDemo: () => config.useMocks
+    ? Promise.resolve<{ status: DemoStatus }>({ status: { active: false, videoId: null, cameraName: "North Junction", sourceMode: "configured", paused: false, available: true, error: null, durationSeconds: null, video: null } })
+    : request<{ status: DemoStatus }>(endpoints.demoStop, { method: "POST" }),
+  pauseDemo: () => request<{ paused: boolean }>(endpoints.demoPause, { method: "POST" }),
+  resumeDemo: () => request<{ paused: boolean }>(endpoints.demoResume, { method: "POST" }),
+  restartDemo: () => request<{ restarted: boolean }>(endpoints.demoRestart, { method: "POST" }),
+  createJunction: (payload: Partial<Junction> & { id: string; name: string }) => request<Junction>(endpoints.addJunction, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }),
+  updateJunction: (junctionId: string, payload: Record<string, unknown>) => request<Junction>(endpoints.updateJunction(junctionId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }),
+  deleteJunction: (junctionId: string) => request<{ deleted: boolean }>(endpoints.deleteJunction(junctionId), { method: "POST" }),
+  createCamera: (junctionId: string, payload: { id: string; name: string; sourceType?: "live" | "demo"; videoUrl?: string; speedLimit?: number | null; enabled?: boolean }) => request<CameraConfig>(endpoints.addCamera(junctionId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }),
+  updateCamera: (cameraId: string, payload: Record<string, unknown>) => request<CameraConfig>(endpoints.updateCamera(cameraId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }),
+  deleteCamera: (cameraId: string) => request<{ deleted: boolean }>(endpoints.deleteCamera(cameraId), { method: "POST" }),
+  createDemoVideo: (payload: { id: string; junctionId: string; title: string; filename: string; description?: string; scenario: string; cameraId?: string | null; duration?: number | null; enabled?: boolean }) => request<DemoVideo>(endpoints.addDemoVideo, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }),
+  updateDemoVideo: (videoId: string, payload: Record<string, unknown>) => request<DemoVideo>(endpoints.updateDemoVideo(videoId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }),
+  deleteDemoVideo: (videoId: string) => request<{ deleted: boolean }>(endpoints.deleteDemoVideo(videoId), { method: "POST" })
 };

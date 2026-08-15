@@ -362,7 +362,16 @@ class TrafficRuntime:
         self.speed_processing_mode = "REAL_TIME"
         self.source_mode = "configured"
         self.camera_name = CAMERA_NAME
+        self.speed_limit = SPEED_LIMIT
         self.browser_connected = False
+        self.demo_video_id: str | None = None
+        self.demo_available = True
+        self.demo_error: str | None = None
+        self._source_path: str | None = None
+        self._demo_paused = False
+        self._restart_requested = False
+        self._demo_duration_seconds = 0.0
+        self._demo_progress = 0.0
         self.session_started_at: str | None = None
         self._frame: bytes | None = None
         self._frame_version = 0
@@ -418,10 +427,71 @@ class TrafficRuntime:
         self.stop()
         self.source_mode = "configured"
         self.camera_name = CAMERA_NAME
+        self.speed_limit = SPEED_LIMIT
         self.browser_connected = False
+        self.demo_video_id = None
+        self.demo_available = True
+        self.demo_error = None
+        self._source_path = None
+        self._demo_paused = False
+        self._restart_requested = False
         self.load_road_profile()
         self._browser_queue = Queue(maxsize=2)
         self.start()
+
+    def use_demo_source(
+        self,
+        path: str,
+        name: str,
+        video_id: str,
+        speed_limit: float | None = None,
+        road_profile: LiveRoadProfile | None = None,
+    ) -> None:
+        """Restart the existing CV pipeline with a demo video as its source."""
+        self.stop()
+        self.source_mode = "demo"
+        self.camera_name = " ".join(name.split())[:80] or "Demo Video"
+        self.speed_limit = float(speed_limit) if speed_limit else SPEED_LIMIT
+        self.browser_connected = False
+        self.demo_video_id = video_id
+        self.demo_available = True
+        self.demo_error = None
+        self._source_path = str(path)
+        self._demo_paused = False
+        self._restart_requested = False
+        self._demo_duration_seconds = 0.0
+        self.set_road_profile(road_profile or self._configured_default_road_profile)
+        self._browser_queue = Queue(maxsize=2)
+        self.start()
+
+    def set_demo_paused(self, paused: bool) -> bool:
+        if self.source_mode != "demo" or not self.running:
+            return self._demo_paused
+        self._demo_paused = bool(paused)
+        with self._condition:
+            self._condition.notify_all()
+        return self._demo_paused
+
+    def restart_demo(self) -> bool:
+        if self.source_mode != "demo" or not self.running:
+            return False
+        self._restart_requested = True
+        self._demo_paused = False
+        with self._condition:
+            self._condition.notify_all()
+        return True
+
+    def demo_status(self) -> dict[str, Any]:
+        return {
+            "active": self.source_mode == "demo" and self.running,
+            "videoId": self.demo_video_id,
+            "cameraName": self.camera_name,
+            "sourceMode": self.source_mode,
+            "paused": bool(self._demo_paused),
+            "available": self.demo_available,
+            "error": self.demo_error,
+            "durationSeconds": round(self._demo_duration_seconds, 1) if self._demo_duration_seconds else None,
+        }
 
     def set_browser_connected(self, connected: bool) -> None:
         self.browser_connected = bool(connected)
@@ -823,7 +893,7 @@ class TrafficRuntime:
             direction=direction,
             evidence_path=stored_path,
             speed=speed,
-            speed_limit=SPEED_LIMIT,
+            speed_limit=self.speed_limit,
         )
         if event is None:
             return None
@@ -1018,7 +1088,7 @@ class TrafficRuntime:
                         "OVERSPEED"
                         if measurement.ready
                         and measurement.confidence >= LIVE_MIN_SPEED_CONFIDENCE
-                        and speed > SPEED_LIMIT
+                        and speed > self.speed_limit
                         else "NORMAL"
                     )
                     if track_id is None:
@@ -1028,7 +1098,7 @@ class TrafficRuntime:
                         continue
                     detection = {
                         "id": track_id, "trackingId": track_id, "vehicleType": vehicle_type,
-                        "plate": None, "speed": speed, "speedLimit": SPEED_LIMIT,
+                        "plate": None, "speed": speed, "speedLimit": self.speed_limit,
                         "status": status, "detectedAt": _utc_now(),
                         "cameraId": CAMERA_ID, "cameraName": self.camera_name, "snapshotUrl": None,
                         "confidence": float(confidence),
@@ -1276,15 +1346,17 @@ class TrafficRuntime:
             if self.source_mode == "browser":
                 source = None
                 spatial_scale = 1.0
-            elif VIDEO_SOURCE.isdigit():
-                source: int | str = int(VIDEO_SOURCE)
-                spatial_scale = 1.0
             else:
-                source, spatial_scale = _prepare_live_file(VIDEO_SOURCE)
+                source_path = self._source_path or VIDEO_SOURCE
+                if str(source_path).isdigit():
+                    source = int(str(source_path))
+                    spatial_scale = 1.0
+                else:
+                    source, spatial_scale = _prepare_live_file(str(source_path))
             if source is not None:
                 camera = cv2.VideoCapture(source)
                 if not camera.isOpened():
-                    raise RuntimeError(f"Cannot open video source: {VIDEO_SOURCE}")
+                    raise RuntimeError(f"Cannot open video source: {self._source_path or VIDEO_SOURCE}")
             is_file = isinstance(source, str) and Path(source).is_file()
             accurate_file_mode = bool(is_file and LIVE_ACCURATE_FILE_MODE)
             analysis_target_fps = LIVE_FILE_ANALYSIS_FPS if accurate_file_mode else ANALYSIS_FPS
@@ -1293,6 +1365,11 @@ class TrafficRuntime:
             )
             source_fps = float(camera.get(cv2.CAP_PROP_FPS) or 0) if camera else LIVE_STREAM_FPS
             self.source_fps = source_fps if 1 <= source_fps <= 120 else 25.0
+            total_frames = int(camera.get(cv2.CAP_PROP_FRAME_COUNT)) if camera else 0
+            self._demo_duration_seconds = (
+                total_frames / self.source_fps
+                if is_file and total_frames > 0 and self.source_fps > 0 else 0.0
+            )
             analysis_thread = threading.Thread(
                 target=self._analysis_loop,
                 args=(
@@ -1316,8 +1393,44 @@ class TrafficRuntime:
             next_stream_timestamp = 0.0
             frame_counter = 0
             fps_started = time.monotonic()
+            last_pause_publish = 0.0
 
             while self.running:
+                if is_file and self._demo_paused and not self._stop_event.wait(0.25):
+                    now = time.monotonic()
+                    if now - last_pause_publish >= 1:
+                        last_pause_publish = now
+                        self._publish({"type": "system_status", "data": {
+                            "connection": "connected", "fps": round(self.fps, 1),
+                            "analysisFps": round(self.analysis_fps, 1),
+                            "activeTracks": self.active_tracks,
+                            "activeDetections": self.active_detections,
+                            "cameraId": CAMERA_ID, "timestamp": _utc_now(),
+                            "sourceMode": self.source_mode,
+                            "cameraName": self.camera_name,
+                            "demoVideoId": self.demo_video_id,
+                            "demoPaused": True,
+                            "demoProgress": self._demo_progress,
+                            "demoDurationSeconds": round(self._demo_duration_seconds, 1)
+                            if self._demo_duration_seconds else None,
+                        }})
+                    continue
+                if is_file and self._restart_requested and not self._stop_event.wait(0.05):
+                    self._restart_requested = False
+                    camera.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    generation += 1
+                    self._generation = generation
+                    self.loop_count = generation
+                    frame_index = 0
+                    loop_started = time.monotonic()
+                    next_analysis_timestamp = 0.0
+                    next_stream_timestamp = 0.0
+                    self._clear_analysis_queue()
+                    with self._annotation_lock:
+                        self._annotations = ()
+                        self._annotation_generation = generation
+                        self._annotation_timestamp = -1.0
+                    continue
                 if is_file and not accurate_file_mode:
                     target_frame = int((time.monotonic() - loop_started) * self.source_fps)
                     while frame_index < target_frame:
@@ -1344,6 +1457,8 @@ class TrafficRuntime:
                     raise RuntimeError("Camera disconnected")
 
                 media_timestamp = frame_index / self.source_fps if is_file else time.monotonic()
+                if is_file and self._demo_duration_seconds:
+                    self._demo_progress = min(1.0, media_timestamp / self._demo_duration_seconds)
                 if is_file and not accurate_file_mode:
                     delay = loop_started + media_timestamp - time.monotonic()
                     if delay > 0 and self._stop_event.wait(delay):
@@ -1378,6 +1493,13 @@ class TrafficRuntime:
                             "activeTracks": self.active_tracks,
                             "activeDetections": self.active_detections,
                             "cameraId": CAMERA_ID, "timestamp": _utc_now(),
+                            "sourceMode": self.source_mode,
+                            "cameraName": self.camera_name,
+                            "demoVideoId": self.demo_video_id,
+                            "demoPaused": bool(self._demo_paused),
+                            "demoProgress": self._demo_progress,
+                            "demoDurationSeconds": round(self._demo_duration_seconds, 1)
+                            if self._demo_duration_seconds else None,
                         }})
                 frame_index += 1
         except Exception as exc:

@@ -8,6 +8,7 @@ import { ThemeProvider } from "./ThemeContext";
 import { LanguageProvider } from "./LanguageContext";
 import { navigate, usePathname, useSearch } from "./router";
 import { AuthProvider, useAuth } from "./AuthContext";
+import { JunctionProvider } from "./JunctionContext";
 import { AlertNotificationManager } from "../features/alerts/AlertNotificationManager";
 
 import { LandingPage } from "../pages/LandingPage";
@@ -64,5 +65,5 @@ function CurrentPage() {
 }
 
 export function App() {
-  return <ThemeProvider><LanguageProvider><QueryClientProvider client={queryClient}><AuthProvider><CurrentPage /></AuthProvider></QueryClientProvider></LanguageProvider></ThemeProvider>;
+  return <ThemeProvider><LanguageProvider><QueryClientProvider client={queryClient}><AuthProvider><JunctionProvider><CurrentPage /></JunctionProvider></AuthProvider></QueryClientProvider></LanguageProvider></ThemeProvider>;
 }

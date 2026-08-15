@@ -32,6 +32,8 @@ from web.violations import parse_lane_rules
 from web.auth import current_user_from_token, require_user, router as auth_router
 from web.video_analysis import router as video_analysis_router
 from web.reports import process_due_reports, router as reports_router
+from web.junctions import router as junctions_router
+from src.database import camera_exists
 
 
 async def report_scheduler_loop():
@@ -75,6 +77,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(video_analysis_router, dependencies=[Depends(require_user)])
 app.include_router(reports_router)
+app.include_router(junctions_router, dependencies=[Depends(require_user)])
 
 
 class CameraSettingsRequest(BaseModel):
@@ -150,6 +153,10 @@ def health():
         "roadWidthMeters": profile.road_width_meters if profile else None,
         "roadLengthMeters": profile.road_length_meters if profile else None,
         "sourceMode": runtime.source_mode,
+        "cameraName": runtime.camera_name,
+        "speedLimit": runtime.speed_limit,
+        "demoVideoId": runtime.demo_video_id,
+        "demoPaused": runtime._demo_paused,
         "browserConnected": runtime.browser_connected,
         "capabilities": runtime.capabilities(),
         "error": runtime.error,
@@ -158,7 +165,7 @@ def health():
 
 @app.get("/api/dashboard/summary", dependencies=[Depends(require_user)])
 def summary():
-    return dashboard_summary(runtime.fps, runtime.session_started_at)
+    return dashboard_summary(runtime.fps, runtime.session_started_at, runtime.speed_limit)
 
 
 @app.get("/api/vehicles", dependencies=[Depends(require_user)])
@@ -220,12 +227,33 @@ def analytics_endpoint(range: Literal["hour", "today", "week"] = "today"):
 
 @app.get("/api/cameras", dependencies=[Depends(require_user)])
 def cameras():
-    return [{
+    from src.database import list_cameras
+    configured = list_cameras()
+    primary = {
         "id": CAMERA_ID, "name": runtime.camera_name,
         "streamAvailable": runtime.running and runtime.error is None,
         "sourceType": runtime.source_mode,
         "browserConnected": runtime.browser_connected,
-    }]
+    }
+    if not configured:
+        return [primary]
+    stream_ready = runtime.running and runtime.error is None
+    items = [
+        {
+            "id": item["id"],
+            "name": item["name"],
+            "streamAvailable": stream_ready,
+            "sourceType": item["sourceType"],
+            "junctionId": item["junctionId"],
+            "junctionName": item["junctionName"],
+            "enabled": item["enabled"],
+            "browserConnected": runtime.browser_connected,
+        }
+        for item in configured if item["enabled"]
+    ]
+    if not any(item["id"] == CAMERA_ID for item in items):
+        items.insert(0, primary)
+    return items
 
 
 @app.post("/api/cameras/browser/start", dependencies=[Depends(require_user)])
@@ -248,9 +276,13 @@ def stop_browser_camera(camera_id: str):
     return {"cameraId": CAMERA_ID, "sourceType": runtime.source_mode}
 
 
+def _camera_exists(camera_id: str) -> bool:
+    return camera_id == CAMERA_ID or camera_exists(camera_id)
+
+
 @app.get("/api/cameras/{camera_id}/calibration", dependencies=[Depends(require_user)])
 def camera_calibration(camera_id: str):
-    if camera_id != CAMERA_ID:
+    if not _camera_exists(camera_id):
         raise HTTPException(status_code=404, detail="Camera not found")
     return {
         "cameraId": camera_id,
@@ -261,7 +293,7 @@ def camera_calibration(camera_id: str):
 
 @app.post("/api/cameras/{camera_id}/calibration", dependencies=[Depends(require_user)])
 def update_camera_calibration(camera_id: str, payload: CameraCalibrationRequest):
-    if camera_id != CAMERA_ID:
+    if not _camera_exists(camera_id):
         raise HTTPException(status_code=404, detail="Camera not found")
     points = tuple((point.x, point.y) for point in payload.sourcePoints)
     polygon = np.asarray(points, dtype=np.float32)
@@ -273,14 +305,18 @@ def update_camera_calibration(camera_id: str, payload: CameraCalibrationRequest)
         points, payload.roadWidthMeters, payload.roadLengthMeters,
         payload.laneCount, payload.quality,
     )
-    save_camera_calibration(runtime.calibration_storage_key(), profile.as_dict())
+    storage_key = (
+        runtime.calibration_storage_key()
+        if camera_id == CAMERA_ID else camera_id
+    )
+    save_camera_calibration(storage_key, profile.as_dict())
     runtime.set_road_profile(profile)
     return {"cameraId": camera_id, "configured": True, "calibration": profile.as_dict()}
 
 
 @app.post("/api/cameras/{camera_id}/settings", dependencies=[Depends(require_user)])
 def camera_settings(camera_id: str, payload: CameraSettingsRequest):
-    if camera_id != CAMERA_ID:
+    if not _camera_exists(camera_id):
         raise HTTPException(status_code=404, detail="Camera not found")
     if payload.confidence is not None:
         runtime.set_confidence(payload.confidence)
@@ -297,7 +333,7 @@ def camera_settings(camera_id: str, payload: CameraSettingsRequest):
 
 @app.get("/api/cameras/{camera_id}/settings", dependencies=[Depends(require_user)])
 def get_camera_settings(camera_id: str):
-    if camera_id != CAMERA_ID:
+    if not _camera_exists(camera_id):
         raise HTTPException(status_code=404, detail="Camera not found")
     return {
         "confidence": runtime.confidence_threshold,
@@ -471,14 +507,14 @@ def assign_alert_operator(
 
 @app.get("/api/cameras/{camera_id}/lanes", dependencies=[Depends(require_user)])
 def camera_lanes(camera_id: str):
-    if camera_id != CAMERA_ID:
+    if not _camera_exists(camera_id):
         raise HTTPException(status_code=404, detail="Camera not found")
     return {"cameraId": camera_id, "rules": [rule.as_dict() for rule in runtime.lane_rules]}
 
 
 @app.post("/api/cameras/{camera_id}/lanes", dependencies=[Depends(require_user)])
 def update_camera_lanes(camera_id: str, payload: CameraLaneRulesRequest):
-    if camera_id != CAMERA_ID:
+    if not _camera_exists(camera_id):
         raise HTTPException(status_code=404, detail="Camera not found")
     raw_rules = [rule.model_dump() for rule in payload.rules]
     try:
@@ -500,7 +536,7 @@ def mjpeg_frames():
 
 @app.get("/api/cameras/{camera_id}/stream", dependencies=[Depends(require_user)])
 def camera_stream(camera_id: str):
-    if camera_id != CAMERA_ID:
+    if not _camera_exists(camera_id):
         raise HTTPException(status_code=404, detail="Camera not found")
     if not runtime.running:
         raise HTTPException(status_code=503, detail=runtime.error or "Pipeline is not running")
@@ -521,6 +557,12 @@ async def live_socket(websocket: WebSocket):
         "activeDetections": runtime.active_detections,
         "speedCalibration": runtime.speed_calibration,
         "cameraId": CAMERA_ID,
+        "sourceMode": runtime.source_mode,
+        "cameraName": runtime.camera_name,
+        "demoVideoId": runtime.demo_video_id,
+        "demoPaused": bool(runtime._demo_paused),
+        "demoProgress": runtime._demo_progress,
+        "demoDurationSeconds": runtime._demo_duration_seconds or None,
         "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }})
     events = broker.subscribe()

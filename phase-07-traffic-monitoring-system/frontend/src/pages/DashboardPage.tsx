@@ -2,6 +2,7 @@ import { Activity, CarFront, Gauge, MapPin, ShieldAlert } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useLive } from "../app/LiveContext";
+import { useJunctions } from "../app/JunctionContext";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Panel } from "../components/ui/Panel";
 import { LoadingSkeleton } from "../components/ui/States";
@@ -17,18 +18,20 @@ import { api } from "../services/api";
 
 export function DashboardPage() {
   const { latest, latestViolation, connection, fps, analysisFps, activeTracks, activeDetections } = useLive();
+  const { selectedCamera, streamVersion: junctionStreamVersion } = useJunctions();
   const summary = useQuery({ queryKey: ["summary"], queryFn: api.getSummary });
   const analytics = useQuery({ queryKey: ["analytics", "today"], queryFn: () => api.getAnalytics("today") });
   const capabilities = useQuery({ queryKey: ["capabilities"], queryFn: api.getCapabilities, refetchInterval: 10_000 });
   const cameras = useQuery({ queryKey: ["cameras"], queryFn: api.getCameras, refetchInterval: 10_000 });
   const plates = useQuery({ queryKey: ["plates", "recent"], queryFn: () => api.getPlates(9) });
   const violationHistory = useQuery({ queryKey: ["violations", "recent"], queryFn: () => api.getViolations(30) });
-  const [streamVersion, setStreamVersion] = useState(0);
-  const camera = cameras.data?.[0] ?? { id: "camera-01", name: "North Junction", streamAvailable: false };
+  const [browserBump, setBrowserBump] = useState(0);
+  const camera = selectedCamera ?? cameras.data?.[0] ?? { id: "camera-01", name: "North Junction", streamAvailable: false };
+  const streamVersion = browserBump + junctionStreamVersion;
   const sourceChanged = () => {
     void cameras.refetch();
     void capabilities.refetch();
-    setStreamVersion((value) => value + 1);
+    setBrowserBump((value) => value + 1);
   };
   const recentViolations = latestViolation
     ? [latestViolation, ...(violationHistory.data?.items ?? []).filter((event) => event.id !== latestViolation.id)]

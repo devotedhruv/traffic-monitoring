@@ -98,8 +98,78 @@ export interface Camera {
   id: string;
   name: string;
   streamAvailable: boolean;
-  sourceType?: "configured" | "browser";
+  sourceType?: "configured" | "browser" | "live" | "demo";
   browserConnected?: boolean;
+  junctionId?: string;
+  junctionName?: string | null;
+  enabled?: boolean;
+}
+
+export type SourceMode = "live" | "demo";
+export type DemoScenario = "normal" | "helmet" | "overspeed" | "wrong_lane" | "anpr" | "heavy" | "night";
+
+export interface Junction {
+  id: string;
+  name: string;
+  location: string;
+  description: string;
+  status: "ACTIVE" | "DISABLED";
+  enabled: boolean;
+  speedLimit: number;
+  cameraCount: number;
+  demoVideoCount: number;
+  cameras?: CameraConfig[];
+}
+
+export interface CameraConfig {
+  id: string;
+  junctionId: string;
+  junctionName: string | null;
+  name: string;
+  sourceType: "live" | "demo";
+  videoUrl: string;
+  speedLimit: number | null;
+  enabled: boolean;
+}
+
+export interface DemoVideo {
+  id: string;
+  junctionId: string;
+  cameraId: string | null;
+  title: string;
+  description: string;
+  filename: string;
+  scenario: DemoScenario;
+  duration: number | null;
+  speedLimit: number;
+  enabled: boolean;
+  available: boolean;
+  previewUrl: string | null;
+}
+
+export interface DemoScenarioOption {
+  id: DemoScenario;
+  label: string;
+}
+
+export interface DemoStatus {
+  active: boolean;
+  videoId: string | null;
+  cameraName: string;
+  sourceMode: string;
+  paused: boolean;
+  available: boolean;
+  error: string | null;
+  durationSeconds: number | null;
+  video: DemoVideo | null;
+}
+
+export interface DemoStartResponse {
+  started: boolean;
+  available: boolean;
+  reason?: string | null;
+  video?: DemoVideo | null;
+  status?: DemoStatus | null;
 }
 
 export interface LiveCameraCalibration {
@@ -450,6 +520,12 @@ export interface SystemStatusEvent {
     activeDetections?: number;
     speedCalibration?: string;
     cameraId: string;
+    sourceMode?: "configured" | "browser" | "demo";
+    cameraName?: string;
+    demoVideoId?: string | null;
+    demoPaused?: boolean;
+    demoProgress?: number;
+    demoDurationSeconds?: number | null;
     timestamp: string;
   };
 }

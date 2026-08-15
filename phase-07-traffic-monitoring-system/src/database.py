@@ -11,7 +11,6 @@ from pathlib import Path
 from config.settings import (
     ALERT_COOLDOWN_SECONDS, CAMERA_ID, CAMERA_NAME, DATABASE_PATH, SPEED_LIMIT,
 )
-
 SQLITE_BUSY_TIMEOUT_MS = 30_000
 
 
@@ -267,6 +266,56 @@ def create_database() -> None:
                 updated_at TEXT NOT NULL
             )
         """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS junctions(
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                location TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                speed_limit REAL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS cameras(
+                id TEXT PRIMARY KEY,
+                junction_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                source_type TEXT NOT NULL DEFAULT 'live',
+                video_url TEXT NOT NULL DEFAULT '',
+                speed_limit REAL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY(junction_id) REFERENCES junctions(id) ON DELETE CASCADE
+            )
+        """)
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cameras_junction ON cameras(junction_id)"
+        )
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS demo_videos(
+                id TEXT PRIMARY KEY,
+                junction_id TEXT NOT NULL,
+                camera_id TEXT,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                filename TEXT NOT NULL,
+                scenario TEXT NOT NULL DEFAULT 'normal',
+                duration_seconds REAL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY(junction_id) REFERENCES junctions(id) ON DELETE CASCADE,
+                FOREIGN KEY(camera_id) REFERENCES cameras(id) ON DELETE SET NULL
+            )
+        """)
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_demo_videos_junction ON demo_videos(junction_id)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_demo_videos_camera ON demo_videos(camera_id)"
+        )
+        _seed_junction_configuration(connection)
         # Preserve historical overspeed records in the new violation read model.
         connection.execute("""
             INSERT OR IGNORE INTO violations(
@@ -278,6 +327,73 @@ def create_database() -> None:
                    'legacy:' || id, 0, speed, ?, REPLACE(time, ' ', 'T') || 'Z'
             FROM vehicles WHERE status = 'OVERSPEED'
         """, (CAMERA_ID, SPEED_LIMIT))
+
+
+def _seed_junction_configuration(connection: sqlite3.Connection) -> None:
+    """Seed instance configuration only when the junction tables are empty."""
+    seeded = connection.execute("SELECT COUNT(*) FROM junctions").fetchone()[0]
+    if seeded:
+        return
+    junction_rows = [
+        ("north", "North Junction", "Birendranagar, Surkhet", "Main city entry point with highest mixed-traffic volume.", 50, 1, 0),
+        ("bus-park", "Surkhet Bus Park", "Bus Park Road, Birendranagar", "Bus and tempo loading zone with heavy pedestrian flow.", 30, 1, 1),
+        ("airport-chowk", "Airport Chowk", "Surkhet Airport Road", "Junction near Surkhet airport access road.", 50, 1, 2),
+        ("demo", "Demo Junction", "Showcase", "Pre-recorded scenarios for presentations and testing.", 50, 1, 3),
+    ]
+    connection.executemany(
+        "INSERT INTO junctions(id, name, location, description, speed_limit, enabled, sort_order) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        junction_rows,
+    )
+    camera_rows = [
+        ("north-cam-01", "north", "Camera 01", "live", "", None, 1, 0),
+        ("north-cam-02", "north", "Camera 02", "live", "", None, 1, 1),
+        ("bus-park-cam-01", "bus-park", "Camera 01", "live", "", None, 1, 0),
+        ("bus-park-cam-02", "bus-park", "Camera 02", "live", "", None, 1, 1),
+        ("airport-cam-01", "airport-chowk", "Camera 01", "live", "", None, 1, 0),
+        ("airport-cam-02", "airport-chowk", "Camera 02", "live", "", None, 1, 1),
+        ("demo-cam-01", "demo", "Camera 01", "demo", "", None, 1, 0),
+        ("demo-cam-02", "demo", "Camera 02", "demo", "", None, 1, 1),
+    ]
+    connection.executemany(
+        "INSERT INTO cameras(id, junction_id, name, source_type, video_url, speed_limit, enabled, sort_order) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        camera_rows,
+    )
+    demo_rows = [
+        ("demo-normal", "demo", "demo-cam-01", "Normal Traffic", "Steady mixed traffic moving within the speed limit.", "normal_traffic.mp4", "normal", None, 1, 0),
+        ("demo-helmet", "demo", "demo-cam-01", "Helmet Violation", "Motorcyclists riding without helmets at the junction.", "helmet_violation.mp4", "helmet", None, 1, 1),
+        ("demo-overspeed", "demo", "demo-cam-01", "Overspeed Detection", "Vehicles exceeding the junction speed limit.", "overspeed.mp4", "overspeed", None, 1, 2),
+        ("demo-wrong-lane", "demo", "demo-cam-02", "Wrong Lane", "Vehicles driving against the permitted lane direction.", "wrong_lane.mp4", "wrong_lane", None, 1, 3),
+        ("demo-anpr", "demo", "demo-cam-02", "ANPR Demo", "Number-plate recognition of passing vehicles.", "anpr_demo.mp4", "anpr", None, 1, 4),
+        ("demo-busy", "demo", "demo-cam-02", "Busy Junction", "Heavy congestion at peak evening hours.", "busy_junction.mp4", "heavy", None, 1, 5),
+        ("demo-night", "demo", "demo-cam-02", "Night Traffic", "Low-light monitoring at night.", "night_traffic.mp4", "night", None, 1, 6),
+    ]
+    junction_demo_videos = [
+        ("normal", "Normal Traffic", "Steady mixed traffic moving within the speed limit.", "normal", "cam-01"),
+        ("traffic-flow", "Mixed Traffic Flow", "Mixed vehicle flow through the junction.", "normal", "cam-02"),
+        ("overspeed", "Overspeed Detection", "Vehicles exceeding the junction speed limit.", "overspeed", "cam-01"),
+        ("heavy", "Heavy Congestion", "Heavy congestion at peak hours.", "heavy", "cam-02"),
+        ("night", "Night Traffic", "Low-light monitoring at night.", "night", "cam-01"),
+    ]
+    demo_files = ["traffic.mp4", "traffic1.mp4", "traffic2.mp4", "traffic3.mp4", "traffic4.mp4"]
+    junction_cameras = {
+        "north": ("north-cam-01", "north-cam-02"),
+        "bus-park": ("bus-park-cam-01", "bus-park-cam-02"),
+        "airport-chowk": ("airport-cam-01", "airport-cam-02"),
+    }
+    for junction_index, (junction_id, (camera_01, camera_02)) in enumerate(junction_cameras.items()):
+        for sort, (key, title, description, scenario, camera_role) in enumerate(junction_demo_videos):
+            camera_id = camera_01 if camera_role == "cam-01" else camera_02
+            filename = demo_files[(sort + junction_index) % len(demo_files)]
+            demo_rows.append(
+                (f"{junction_id}-{key}", junction_id, camera_id, title, description, filename, scenario, None, 1, sort)
+            )
+    connection.executemany(
+        "INSERT INTO demo_videos(id, junction_id, camera_id, title, description, filename, scenario, duration_seconds, enabled, sort_order) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        demo_rows,
+    )
 
 
 def _serialize_user(row: sqlite3.Row) -> dict[str, Any]:
@@ -1306,7 +1422,11 @@ def _attach_vehicle_violations(items: list[dict[str, Any]]) -> None:
         item["violations"] = by_vehicle[int(item["id"])]
 
 
-def dashboard_summary(current_fps: float = 0, since: str | None = None) -> dict[str, Any]:
+def dashboard_summary(
+    current_fps: float = 0,
+    since: str | None = None,
+    speed_limit: float | None = None,
+) -> dict[str, Any]:
     where = "WHERE time >= datetime(?)" if since else ""
     parameters = (since,) if since else ()
     with _connect() as connection:
@@ -1321,7 +1441,8 @@ def dashboard_summary(current_fps: float = 0, since: str | None = None) -> dict[
     return {
         "totalVehicles": row["total"], "overspeedVehicles": row["overspeed"] or 0,
         "averageSpeed": round(row["average_speed"], 2), "maxSpeed": round(row["max_speed"], 2),
-        "currentFps": round(current_fps, 1), "speedLimit": SPEED_LIMIT,
+        "currentFps": round(current_fps, 1),
+        "speedLimit": float(speed_limit) if speed_limit is not None else SPEED_LIMIT,
     }
 
 
@@ -1351,4 +1472,398 @@ def analytics(range_name: str) -> dict[str, Any]:
         ],
         "averageSpeed": round(sum(speeds) / len(speeds), 2) if speeds else 0,
         "maxSpeed": max(speeds, default=0),
+    }
+
+
+def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    return {key: row[key] for key in row.keys()}
+
+
+def list_junctions() -> list[dict[str, Any]]:
+    with _connect() as connection:
+        rows = connection.execute(
+            "SELECT * FROM junctions ORDER BY sort_order, name"
+        ).fetchall()
+    return [_serialize_junction(row) for row in rows]
+
+
+def get_junction(junction_id: str) -> dict[str, Any] | None:
+    with _connect() as connection:
+        row = connection.execute(
+            "SELECT * FROM junctions WHERE id = ?", (junction_id,)
+        ).fetchone()
+    return _serialize_junction(row) if row else None
+
+
+def create_junction(
+    junction_id: str,
+    name: str,
+    location: str = "",
+    description: str = "",
+    speed_limit: float | None = None,
+    enabled: bool = True,
+) -> dict[str, Any] | None:
+    with _connect() as connection:
+        try:
+            connection.execute(
+                "INSERT INTO junctions(id, name, location, description, speed_limit, enabled) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (junction_id, name, location, description, speed_limit, int(enabled)),
+            )
+        except sqlite3.IntegrityError:
+            return None
+        row = connection.execute(
+            "SELECT * FROM junctions WHERE id = ?", (junction_id,)
+        ).fetchone()
+    return _serialize_junction(row) if row else None
+
+
+def update_junction(
+    junction_id: str,
+    name: str | None = None,
+    location: str | None = None,
+    description: str | None = None,
+    speed_limit: float | None = None,
+    enabled: bool | None = None,
+) -> dict[str, Any] | None:
+    updates: list[str] = []
+    values: list[Any] = []
+    if name is not None:
+        updates.append("name = ?")
+        values.append(name)
+    if location is not None:
+        updates.append("location = ?")
+        values.append(location)
+    if description is not None:
+        updates.append("description = ?")
+        values.append(description)
+    if speed_limit is not None:
+        updates.append("speed_limit = ?")
+        values.append(speed_limit)
+    if enabled is not None:
+        updates.append("enabled = ?")
+        values.append(int(enabled))
+    if not updates:
+        return get_junction(junction_id)
+    values.append(junction_id)
+    with _connect() as connection:
+        connection.execute(
+            f"UPDATE junctions SET {', '.join(updates)} WHERE id = ?", values,
+        )
+        row = connection.execute(
+            "SELECT * FROM junctions WHERE id = ?", (junction_id,)
+        ).fetchone()
+    return _serialize_junction(row) if row else None
+
+
+def delete_junction(junction_id: str) -> bool:
+    with _connect() as connection:
+        cursor = connection.execute("DELETE FROM junctions WHERE id = ?", (junction_id,))
+        return cursor.rowcount > 0
+
+
+def list_cameras(junction_id: str | None = None) -> list[dict[str, Any]]:
+    where = "WHERE junction_id = ?" if junction_id else ""
+    values = (junction_id,) if junction_id else ()
+    with _connect() as connection:
+        rows = connection.execute(
+            f"SELECT * FROM cameras {where} ORDER BY junction_id, sort_order, name",
+            values,
+        ).fetchall()
+    return [_serialize_camera(row) for row in rows]
+
+
+def get_camera(camera_id: str) -> dict[str, Any] | None:
+    with _connect() as connection:
+        row = connection.execute(
+            "SELECT * FROM cameras WHERE id = ?", (camera_id,)
+        ).fetchone()
+    return _serialize_camera(row) if row else None
+
+
+def camera_exists(camera_id: str) -> bool:
+    with _connect() as connection:
+        row = connection.execute(
+            "SELECT 1 FROM cameras WHERE id = ?", (camera_id,)
+        ).fetchone()
+    return row is not None
+
+
+def create_camera(
+    camera_id: str,
+    junction_id: str,
+    name: str,
+    source_type: str = "live",
+    video_url: str = "",
+    speed_limit: float | None = None,
+    enabled: bool = True,
+) -> dict[str, Any] | None:
+    if source_type not in {"live", "demo"}:
+        raise ValueError("source_type must be 'live' or 'demo'")
+    with _connect() as connection:
+        junction = connection.execute(
+            "SELECT 1 FROM junctions WHERE id = ?", (junction_id,)
+        ).fetchone()
+        if junction is None:
+            raise LookupError("Junction not found")
+        try:
+            connection.execute(
+                "INSERT INTO cameras(id, junction_id, name, source_type, video_url, speed_limit, enabled) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (camera_id, junction_id, name, source_type, video_url, speed_limit, int(enabled)),
+            )
+        except sqlite3.IntegrityError:
+            return None
+        row = connection.execute(
+            "SELECT * FROM cameras WHERE id = ?", (camera_id,)
+        ).fetchone()
+    return _serialize_camera(row) if row else None
+
+
+def update_camera(
+    camera_id: str,
+    junction_id: str | None = None,
+    name: str | None = None,
+    source_type: str | None = None,
+    video_url: str | None = None,
+    speed_limit: float | None = None,
+    enabled: bool | None = None,
+) -> dict[str, Any] | None:
+    if source_type is not None and source_type not in {"live", "demo"}:
+        raise ValueError("source_type must be 'live' or 'demo'")
+    updates: list[str] = []
+    values: list[Any] = []
+    if junction_id is not None:
+        updates.append("junction_id = ?")
+        values.append(junction_id)
+    if name is not None:
+        updates.append("name = ?")
+        values.append(name)
+    if source_type is not None:
+        updates.append("source_type = ?")
+        values.append(source_type)
+    if video_url is not None:
+        updates.append("video_url = ?")
+        values.append(video_url)
+    if speed_limit is not None:
+        updates.append("speed_limit = ?")
+        values.append(speed_limit)
+    if enabled is not None:
+        updates.append("enabled = ?")
+        values.append(int(enabled))
+    if not updates:
+        return get_camera(camera_id)
+    values.append(camera_id)
+    with _connect() as connection:
+        connection.execute(
+            f"UPDATE cameras SET {', '.join(updates)} WHERE id = ?", values,
+        )
+        row = connection.execute(
+            "SELECT * FROM cameras WHERE id = ?", (camera_id,)
+        ).fetchone()
+    return _serialize_camera(row) if row else None
+
+
+def delete_camera(camera_id: str) -> bool:
+    with _connect() as connection:
+        cursor = connection.execute("DELETE FROM cameras WHERE id = ?", (camera_id,))
+        return cursor.rowcount > 0
+
+
+DEMO_SCENARIOS = (
+    "normal",
+    "helmet",
+    "overspeed",
+    "wrong_lane",
+    "anpr",
+    "heavy",
+    "night",
+)
+
+
+def list_demo_videos(
+    junction_id: str | None = None,
+    camera_id: str | None = None,
+    scenario: str | None = None,
+    enabled_only: bool = True,
+) -> list[dict[str, Any]]:
+    clauses: list[str] = []
+    values: list[Any] = []
+    if junction_id:
+        clauses.append("demo_videos.junction_id = ?")
+        values.append(junction_id)
+    if camera_id:
+        clauses.append("demo_videos.camera_id = ?")
+        values.append(camera_id)
+    if scenario and scenario != "all":
+        clauses.append("demo_videos.scenario = ?")
+        values.append(scenario)
+    if enabled_only:
+        clauses.append("demo_videos.enabled = 1")
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with _connect() as connection:
+        rows = connection.execute(
+            f"SELECT * FROM demo_videos {where} ORDER BY demo_videos.sort_order, demo_videos.title",
+            values,
+        ).fetchall()
+    return [_serialize_demo_video(row) for row in rows]
+
+
+def get_demo_video(video_id: str) -> dict[str, Any] | None:
+    with _connect() as connection:
+        row = connection.execute(
+            "SELECT * FROM demo_videos WHERE id = ?", (video_id,)
+        ).fetchone()
+    return _serialize_demo_video(row) if row else None
+
+
+def create_demo_video(
+    video_id: str,
+    junction_id: str,
+    title: str,
+    filename: str,
+    description: str = "",
+    scenario: str = "normal",
+    camera_id: str | None = None,
+    duration_seconds: float | None = None,
+    enabled: bool = True,
+) -> dict[str, Any] | None:
+    if scenario not in DEMO_SCENARIOS:
+        raise ValueError(f"Unsupported demo scenario: {scenario}")
+    with _connect() as connection:
+        junction = connection.execute(
+            "SELECT 1 FROM junctions WHERE id = ?", (junction_id,)
+        ).fetchone()
+        if junction is None:
+            raise LookupError("Junction not found")
+        if camera_id is not None:
+            camera = connection.execute(
+                "SELECT 1 FROM cameras WHERE id = ?", (camera_id,)
+            ).fetchone()
+            if camera is None:
+                raise LookupError("Camera not found")
+        try:
+            connection.execute(
+                "INSERT INTO demo_videos(id, junction_id, camera_id, title, description, filename, scenario, duration_seconds, enabled) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (video_id, junction_id, camera_id, title, description, filename, scenario, duration_seconds, int(enabled)),
+            )
+        except sqlite3.IntegrityError:
+            return None
+        row = connection.execute(
+            "SELECT * FROM demo_videos WHERE id = ?", (video_id,)
+        ).fetchone()
+    return _serialize_demo_video(row) if row else None
+
+
+def update_demo_video(
+    video_id: str,
+    junction_id: str | None = None,
+    camera_id: str | None = None,
+    title: str | None = None,
+    description: str | None = None,
+    filename: str | None = None,
+    scenario: str | None = None,
+    duration_seconds: float | None = None,
+    enabled: bool | None = None,
+) -> dict[str, Any] | None:
+    if scenario is not None and scenario not in DEMO_SCENARIOS:
+        raise ValueError(f"Unsupported demo scenario: {scenario}")
+    updates: list[str] = []
+    values: list[Any] = []
+    if junction_id is not None:
+        updates.append("junction_id = ?")
+        values.append(junction_id)
+    if camera_id is not None:
+        updates.append("camera_id = ?")
+        values.append(camera_id)
+    if title is not None:
+        updates.append("title = ?")
+        values.append(title)
+    if description is not None:
+        updates.append("description = ?")
+        values.append(description)
+    if filename is not None:
+        updates.append("filename = ?")
+        values.append(filename)
+    if scenario is not None:
+        updates.append("scenario = ?")
+        values.append(scenario)
+    if duration_seconds is not None:
+        updates.append("duration_seconds = ?")
+        values.append(duration_seconds)
+    if enabled is not None:
+        updates.append("enabled = ?")
+        values.append(int(enabled))
+    if not updates:
+        return get_demo_video(video_id)
+    values.append(video_id)
+    with _connect() as connection:
+        connection.execute(
+            f"UPDATE demo_videos SET {', '.join(updates)} WHERE id = ?", values,
+        )
+        row = connection.execute(
+            "SELECT * FROM demo_videos WHERE id = ?", (video_id,)
+        ).fetchone()
+    return _serialize_demo_video(row) if row else None
+
+
+def delete_demo_video(video_id: str) -> bool:
+    with _connect() as connection:
+        cursor = connection.execute("DELETE FROM demo_videos WHERE id = ?", (video_id,))
+        return cursor.rowcount > 0
+
+
+def _serialize_junction(row: sqlite3.Row) -> dict[str, Any]:
+    junction_id = str(row["id"])
+    with _connect() as connection:
+        camera_count = int(connection.execute(
+            "SELECT COUNT(*) FROM cameras WHERE junction_id = ?", (junction_id,)
+        ).fetchone()[0])
+        demo_count = int(connection.execute(
+            "SELECT COUNT(*) FROM demo_videos WHERE junction_id = ?", (junction_id,)
+        ).fetchone()[0])
+    speed_limit = row["speed_limit"]
+    return {
+        "id": junction_id,
+        "name": row["name"],
+        "location": row["location"] or "",
+        "description": row["description"] or "",
+        "status": "ACTIVE" if row["enabled"] else "DISABLED",
+        "enabled": bool(row["enabled"]),
+        "speedLimit": float(speed_limit) if speed_limit is not None else SPEED_LIMIT,
+        "cameraCount": camera_count,
+        "demoVideoCount": demo_count,
+    }
+
+
+def _serialize_camera(row: sqlite3.Row) -> dict[str, Any]:
+    speed_limit = row["speed_limit"]
+    junction = get_junction(str(row["junction_id"]))
+    return {
+        "id": str(row["id"]),
+        "junctionId": str(row["junction_id"]),
+        "junctionName": junction["name"] if junction else None,
+        "name": row["name"],
+        "sourceType": row["source_type"],
+        "videoUrl": row["video_url"] or "",
+        "speedLimit": float(speed_limit) if speed_limit is not None else None,
+        "enabled": bool(row["enabled"]),
+    }
+
+
+def _serialize_demo_video(row: sqlite3.Row) -> dict[str, Any]:
+    junction = get_junction(str(row["junction_id"]))
+    speed_limit = junction["speedLimit"] if junction else SPEED_LIMIT
+    return {
+        "id": str(row["id"]),
+        "junctionId": str(row["junction_id"]),
+        "cameraId": str(row["camera_id"]) if row["camera_id"] else None,
+        "title": row["title"],
+        "description": row["description"] or "",
+        "filename": row["filename"],
+        "scenario": row["scenario"],
+        "duration": float(row["duration_seconds"]) if row["duration_seconds"] is not None else None,
+        "speedLimit": speed_limit,
+        "enabled": bool(row["enabled"]),
     }
